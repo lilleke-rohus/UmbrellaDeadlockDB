@@ -6,12 +6,47 @@ import type { ScriptRow } from '../../../shared/supabase.types'
 import { useInstallState } from '../hooks/useInstallState'
 import type { CachedScriptMeta } from '../lib/catalogDb'
 import { useToast } from '../context/ToastContext'
+import { userFacingMessage } from '../lib/userFacingError'
 import { IconScriptTile } from '../components/NavIcons'
 
 type ChangelogEntry = { id: string; version: number; body: string; created_at: string }
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function SkeletonDetail(): React.ReactElement {
+  return (
+    <div className="page detail-page" aria-hidden>
+      <div className="sk" style={{ height: 13, width: 56, marginBottom: 16 }} />
+
+      <div className="detail-hero">
+        <div className="sk" style={{ width: 48, height: 48, borderRadius: 10, flexShrink: 0 }} />
+        <div className="detail-hero-body">
+          <div className="detail-hero-top" style={{ marginBottom: 10 }}>
+            <div className="sk" style={{ height: 18, width: 220 }} />
+            <div className="sk" style={{ height: 20, width: 52, borderRadius: 20 }} />
+          </div>
+          <div className="sk" style={{ height: 12, width: 200 }} />
+        </div>
+      </div>
+
+      <div className="detail-desc-section">
+        <div className="sk" style={{ height: 11, width: 80, marginBottom: 10 }} />
+        <div className="sk" style={{ height: 13, width: '100%', marginBottom: 5 }} />
+        <div className="sk" style={{ height: 13, width: '100%', marginBottom: 5 }} />
+        <div className="sk" style={{ height: 13, width: '60%' }} />
+      </div>
+
+      <div className="detail-action-bar">
+        <div className="detail-action-primary">
+          <div className="sk" style={{ height: 30, width: 88, borderRadius: 8 }} />
+          <div className="sk" style={{ height: 30, width: 120, borderRadius: 8 }} />
+          <div className="sk" style={{ height: 30, width: 96, borderRadius: 8 }} />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function ScriptDetailPage(): React.ReactElement {
@@ -22,7 +57,6 @@ export function ScriptDetailPage(): React.ReactElement {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
   const [luaSource, setLuaSource] = useState<string | null>(null)
   const [showSource, setShowSource] = useState(false)
   const [changelogHistory, setChangelogHistory] = useState<ChangelogEntry[]>([])
@@ -77,7 +111,7 @@ export function ScriptDetailPage(): React.ReactElement {
         .maybeSingle()
       if (cancelled) return
       if (error) {
-        setErr(error.message)
+        setErr(userFacingMessage(error))
         setRow(null)
         setLoading(false)
         return
@@ -110,26 +144,31 @@ export function ScriptDetailPage(): React.ReactElement {
   async function installOrUpdate(): Promise<void> {
     if (!row) return
     setBusy(true)
-    setMsg(null)
     try {
       const settings = await window.umbrella.getSettings()
       if (!settings.scriptsRootPath) {
-        setMsg('Choose a scripts folder in Settings first.')
+        addToast('Choose a scripts folder in Settings first.', 'error')
         return
       }
       let source = luaSource
       if (!source) {
-        if (!supabase) { setMsg('Could not fetch script source.'); return }
+        if (!supabase) {
+          addToast('Could not fetch script source.', 'error')
+          return
+        }
         const { data: src } = await supabase.from('scripts').select('lua_source').eq('id', row.id).single()
         if (!src || !(src as { lua_source: string | null }).lua_source) {
-          setMsg('Could not fetch script source.')
+          addToast('Could not fetch script source.', 'error')
           return
         }
         source = (src as { lua_source: string }).lua_source
         setLuaSource(source)
       }
       const w = await window.umbrella.writeScript(row.filename, source)
-      if (!w.ok) { setMsg(w.error ?? 'Write failed'); return }
+      if (!w.ok) {
+        addToast(w.error ?? 'Write failed', 'error')
+        return
+      }
       const inst = await window.umbrella.setManifestEntry(row.id, {
         scriptId: row.id,
         filename: row.filename,
@@ -137,7 +176,10 @@ export function ScriptDetailPage(): React.ReactElement {
         updatedAt: row.updated_at,
         installedAt: new Date().toISOString()
       })
-      if (!inst.ok) { setMsg(inst.error ?? 'Manifest update failed'); return }
+      if (!inst.ok) {
+        addToast(inst.error ?? 'Manifest update failed', 'error')
+        return
+      }
       if (installState === 'install' && supabase && user) {
         await supabase.rpc('increment_install_count', { p_script_id: row.id })
       }
@@ -151,7 +193,6 @@ export function ScriptDetailPage(): React.ReactElement {
   async function uninstall(): Promise<void> {
     if (!row) return
     setBusy(true)
-    setMsg(null)
     try {
       await window.umbrella.deleteScript(row.filename)
       await window.umbrella.setManifestEntry(row.id, null)
@@ -164,7 +205,7 @@ export function ScriptDetailPage(): React.ReactElement {
 
   if (!slug) return <p className="error">Missing slug</p>
   if (err) return <p className="error">{err}</p>
-  if (loading) return <div className="page-loading">Loading…</div>
+  if (loading) return <SkeletonDetail />
   if (!row) {
     return (
       <div className="page">
@@ -179,7 +220,7 @@ export function ScriptDetailPage(): React.ReactElement {
   const isInstalled = installState === 'current' || installState === 'update'
 
   return (
-    <div className="page detail-page">
+    <div className="page detail-page fade-in">
       <Link to="/" className="detail-back">← Store</Link>
 
       {/* Hero header — mirrors card layout */}
@@ -262,15 +303,6 @@ export function ScriptDetailPage(): React.ReactElement {
           </button>
         )}
       </div>
-
-      {msg && (
-        <p
-          className={`feedback ${msg.includes('Saved') ? 'success' : 'error'}`}
-          role={msg.includes('Saved') ? 'status' : 'alert'}
-        >
-          {msg}
-        </p>
-      )}
 
       {/* Changelog */}
       {changelogHistory.length > 0 ? (

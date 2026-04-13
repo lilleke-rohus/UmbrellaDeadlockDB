@@ -4,12 +4,13 @@ import { useAuth } from '../context/AuthContext'
 import { getLastSyncedAt } from '../lib/catalogDb'
 import { supabase } from '../lib/supabase'
 import { runAutoUpdate } from '../lib/autoUpdate'
+import { useToast } from '../context/ToastContext'
 
 export function SettingsPage(): React.ReactElement {
   const { user, profile, role, refreshProfile, loading: authLoading } = useAuth()
+  const { addToast } = useToast()
   const [root, setRoot] = useState('')
   const [lastSync, setLastSync] = useState<string | null>(null)
-  const [msg, setMsg] = useState<string | null>(null)
   const [accountName, setAccountName] = useState('')
   const [accountBusy, setAccountBusy] = useState(false)
   const [accountError, setAccountError] = useState<string | null>(null)
@@ -42,14 +43,16 @@ export function SettingsPage(): React.ReactElement {
 
   async function pickFolder(): Promise<void> {
     const picked = await window.umbrella.pickScriptsDirectory()
-    if (picked) { setRoot(picked); setMsg(null) }
+    if (picked) { setRoot(picked) }
   }
 
   async function saveRoot(): Promise<void> {
-    setMsg(null)
     const res = await window.umbrella.setScriptsRoot(root.trim())
-    if (!res.ok) { setMsg(res.error ?? 'Failed to save path'); return }
-    setMsg('Saved scripts folder.')
+    if (!res.ok) {
+      addToast(res.error ?? 'Failed to save path', 'error')
+      return
+    }
+    addToast('Saved scripts folder.', 'success')
   }
 
   async function saveDisplayName(): Promise<void> {
@@ -323,14 +326,6 @@ export function SettingsPage(): React.ReactElement {
           </button>
         </div>
 
-        {msg && (
-          <p
-            className={`feedback ${msg.includes('Failed') ? 'error' : 'success'}`}
-            role={msg.includes('Failed') ? 'alert' : 'status'}
-          >
-            {msg}
-          </p>
-        )}
       </section>
 
       {/* Catalog section */}

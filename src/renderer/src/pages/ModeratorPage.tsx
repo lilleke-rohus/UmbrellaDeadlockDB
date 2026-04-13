@@ -2,6 +2,8 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import type { ScriptRow } from '../../../shared/supabase.types'
+import { useToast } from '../context/ToastContext'
+import { userFacingMessage } from '../lib/userFacingError'
 
 function relativeDate(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -14,8 +16,8 @@ function relativeDate(iso: string): string {
 }
 
 export function ModeratorPage(): React.ReactElement {
+  const { addToast } = useToast()
   const [queue, setQueue] = useState<ScriptRow[]>([])
-  const [msg, setMsg] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -31,19 +33,25 @@ export function ModeratorPage(): React.ReactElement {
       .select('*')
       .eq('status', 'pending_review')
       .order('updated_at', { ascending: true })
-    if (error) { setMsg(error.message); return }
+    if (error) {
+      addToast(userFacingMessage(error), 'error')
+      return
+    }
     setQueue((data as ScriptRow[]) ?? [])
-  }, [])
+  }, [addToast])
 
   useEffect(() => { void load() }, [load])
 
   async function approve(id: string): Promise<void> {
     if (!supabase) return
     setBusyId(id)
-    setMsg(null)
     try {
       const { error } = await supabase.from('scripts').update({ status: 'published' }).eq('id', id)
-      if (error) { setMsg(error.message); return }
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
+      addToast('Published to the store.', 'success')
       await load()
     } finally {
       setBusyId(null)
@@ -70,12 +78,15 @@ export function ModeratorPage(): React.ReactElement {
     if (!supabase || !rejectingId) return
     const reason = rejectReason.trim() || 'Rejected'
     setBusyId(rejectingId)
-    setMsg(null)
     try {
       const { error } = await supabase.from('scripts')
         .update({ status: 'rejected', rejected_reason: reason })
         .eq('id', rejectingId)
-      if (error) { setMsg(error.message); return }
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
+      addToast('Script rejected.', 'success')
       setRejectingId(null)
       setRejectReason('')
       await load()
@@ -87,8 +98,6 @@ export function ModeratorPage(): React.ReactElement {
   return (
     <div className="page mod-page">
       <p className="store-lead muted">Publish to the store or send back with a reason.</p>
-
-      {msg && <p className="error feedback">{msg}</p>}
 
       {rejectingId && (
         <div className="setting-block" style={{ marginBottom: 16 }}>

@@ -924,19 +924,33 @@ select {
   justify-content: flex-end;
 }
 
-.skeleton-card {
-  min-height: 160px;
-  animation: sk 1.2s ease-in-out infinite;
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
-@keyframes sk {
-  0%,
-  100% {
-    opacity: 0.5;
-  }
-  50% {
-    opacity: 0.9;
-  }
+.sk {
+  background: linear-gradient(
+    90deg,
+    var(--color-background-secondary) 0%,
+    #3c3b38 50%,
+    var(--color-background-secondary) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* Content fade-in on mount */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.fade-in {
+  animation: fade-in 0.18s ease both;
 }
 
 .empty-state {
@@ -1292,6 +1306,83 @@ select {
   border-radius: var(--border-radius-lg);
   padding: 16px;
   background: var(--color-background-primary);
+}
+
+.draft-meta-split {
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 300px);
+  gap: 16px;
+  align-items: stretch;
+  margin-bottom: 4px;
+}
+
+.draft-meta-fields {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .draft-meta-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lua-drop-zone {
+  border: 0.5px dashed var(--color-border-secondary);
+  border-radius: var(--border-radius-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 14px;
+  min-height: 200px;
+  background: transparent;
+  text-align: center;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.lua-drop-zone:hover {
+  background: var(--color-background-secondary);
+}
+
+.lua-drop-zone.drag-active {
+  border-color: var(--color-text-tertiary);
+  background: var(--color-background-secondary);
+}
+
+.lua-drop-zone-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.lua-drop-zone-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.lua-drop-zone-sub {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-tertiary);
+  max-width: 260px;
+}
+
+.lua-drop-zone-file {
+  font-size: 11px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  color: var(--color-text-secondary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.lua-drop-zone-browse {
+  margin-top: 4px;
 }
 
 .form-grid {

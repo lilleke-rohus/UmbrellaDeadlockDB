@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
+import { userFacingMessage } from '../lib/userFacingError'
 import type { AdminSettingRow, ProfileRole, ScriptRow } from '../../../shared/supabase.types'
 
 type AdminProfileRow = {
@@ -30,11 +32,11 @@ type ScriptListRow = Pick<ScriptRow, 'id' | 'slug' | 'title' | 'author_id' | 'st
 
 export function AdminPage(): React.ReactElement {
   const { user } = useAuth()
+  const { addToast } = useToast()
   const [profiles, setProfiles] = useState<AdminProfileRow[]>([])
   const [scripts, setScripts] = useState<ScriptListRow[]>([])
   const [settings, setSettings] = useState<AdminSettingRow[]>([])
   const [coauthors, setCoauthors] = useState<CoauthorRow[]>([])
-  const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const [coScriptId, setCoScriptId] = useState('')
@@ -52,11 +54,11 @@ export function AdminPage(): React.ReactElement {
     }
     const { data, error } = await supabase.rpc('admin_list_profiles')
     if (error) {
-      setMsg(error.message)
+      addToast(userFacingMessage(error), 'error')
       return
     }
     setProfiles((data as AdminProfileRow[]) ?? [])
-  }, [])
+  }, [addToast])
 
   const loadScripts = useCallback(async () => {
     if (!supabase) {
@@ -68,11 +70,11 @@ export function AdminPage(): React.ReactElement {
       .order('updated_at', { ascending: false })
       .limit(500)
     if (error) {
-      setMsg(error.message)
+      addToast(userFacingMessage(error), 'error')
       return
     }
     setScripts((data as ScriptListRow[]) ?? [])
-  }, [])
+  }, [addToast])
 
   const loadSettings = useCallback(async () => {
     if (!supabase) {
@@ -80,11 +82,11 @@ export function AdminPage(): React.ReactElement {
     }
     const { data, error } = await supabase.from('admin_settings').select('*').order('key')
     if (error) {
-      setMsg(error.message)
+      addToast(userFacingMessage(error), 'error')
       return
     }
     setSettings((data as AdminSettingRow[]) ?? [])
-  }, [])
+  }, [addToast])
 
   const loadCoauthors = useCallback(async () => {
     if (!supabase) {
@@ -96,7 +98,7 @@ export function AdminPage(): React.ReactElement {
       .order('created_at', { ascending: false })
       .limit(200)
     if (error) {
-      setMsg(error.message)
+      addToast(userFacingMessage(error), 'error')
       return
     }
     type RawCoauthor = Omit<CoauthorRow, 'scripts'> & { scripts: { slug: string; title: string }[] | { slug: string; title: string } | null }
@@ -105,10 +107,9 @@ export function AdminPage(): React.ReactElement {
       scripts: Array.isArray(r.scripts) ? (r.scripts[0] ?? null) : r.scripts,
     }))
     setCoauthors(normalized)
-  }, [])
+  }, [addToast])
 
   const reloadAll = useCallback(async () => {
-    setMsg(null)
     await Promise.all([loadProfiles(), loadScripts(), loadSettings(), loadCoauthors()])
   }, [loadCoauthors, loadProfiles, loadScripts, loadSettings])
 
@@ -126,11 +127,10 @@ export function AdminPage(): React.ReactElement {
       return
     }
     setBusy(true)
-    setMsg(null)
     try {
       const { error } = await supabase.from('profiles').update(patch).eq('id', id)
       if (error) {
-        setMsg(error.message)
+        addToast(userFacingMessage(error), 'error')
         return
       }
       await loadProfiles()
@@ -141,18 +141,20 @@ export function AdminPage(): React.ReactElement {
 
   async function saveAuthorOverride(): Promise<void> {
     if (!supabase || !overrideScriptId) {
-      setMsg('Select a script first.')
+      addToast('Select a script first.', 'error')
       return
     }
     setBusy(true)
-    setMsg(null)
     try {
       const value = overrideName.trim() || null
       const { error } = await supabase
         .from('scripts')
         .update({ author_display_name_override: value })
         .eq('id', overrideScriptId)
-      if (error) { setMsg(error.message); return }
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
       setOverrideName('')
       setOverrideScriptId('')
       await loadScripts()
@@ -164,13 +166,15 @@ export function AdminPage(): React.ReactElement {
   async function clearAuthorOverride(id: string): Promise<void> {
     if (!supabase) return
     setBusy(true)
-    setMsg(null)
     try {
       const { error } = await supabase
         .from('scripts')
         .update({ author_display_name_override: null })
         .eq('id', id)
-      if (error) { setMsg(error.message); return }
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
       await loadScripts()
     } finally {
       setBusy(false)
@@ -185,11 +189,10 @@ export function AdminPage(): React.ReactElement {
     try {
       parsed = JSON.parse(setValueJson) as object
     } catch {
-      setMsg('Setting value must be valid JSON.')
+      addToast('Setting value must be valid JSON.', 'error')
       return
     }
     setBusy(true)
-    setMsg(null)
     try {
       const { error } = await supabase.from('admin_settings').upsert(
         {
@@ -201,7 +204,7 @@ export function AdminPage(): React.ReactElement {
         { onConflict: 'key' }
       )
       if (error) {
-        setMsg(error.message)
+        addToast(userFacingMessage(error), 'error')
         return
       }
       setSetKey('')
@@ -217,11 +220,10 @@ export function AdminPage(): React.ReactElement {
       return
     }
     setBusy(true)
-    setMsg(null)
     try {
       const { error } = await supabase.from('admin_settings').delete().eq('key', key)
       if (error) {
-        setMsg(error.message)
+        addToast(userFacingMessage(error), 'error')
         return
       }
       await loadSettings()
@@ -232,18 +234,17 @@ export function AdminPage(): React.ReactElement {
 
   async function addCoauthor(): Promise<void> {
     if (!supabase || !coScriptId || !coProfileId.trim()) {
-      setMsg('Choose a script and enter a profile UUID.')
+      addToast('Choose a script and enter a profile UUID.', 'error')
       return
     }
     setBusy(true)
-    setMsg(null)
     try {
       const { error } = await supabase.from('script_coauthors').insert({
         script_id: coScriptId,
         profile_id: coProfileId.trim()
       })
       if (error) {
-        setMsg(error.message)
+        addToast(userFacingMessage(error), 'error')
         return
       }
       setCoProfileId('')
@@ -258,11 +259,10 @@ export function AdminPage(): React.ReactElement {
       return
     }
     setBusy(true)
-    setMsg(null)
     try {
       const { error } = await supabase.from('script_coauthors').delete().eq('id', id)
       if (error) {
-        setMsg(error.message)
+        addToast(userFacingMessage(error), 'error')
         return
       }
       await loadCoauthors()
@@ -305,8 +305,6 @@ export function AdminPage(): React.ReactElement {
           </div>
         ))}
       </div>
-
-      {msg && <p className="error" style={{ marginBottom: 12 }}>{msg}</p>}
 
       <section className="settings-section">
         <div className="settings-section-title">Users</div>

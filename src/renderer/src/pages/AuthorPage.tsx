@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { parseUmbrellaHeader, stripFirstLine } from '../lib/firstLine'
@@ -8,6 +8,8 @@ import type { ScriptRow, ScriptStatus } from '../../../shared/supabase.types'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconScriptTile } from '../components/NavIcons'
 import { loadCachedCatalog } from '../lib/catalogDb'
+import { useToast } from '../context/ToastContext'
+import { userFacingMessage } from '../lib/userFacingError'
 
 type DraftForm = {
   id: string | null
@@ -79,6 +81,105 @@ function parseContentVersion(value: string): number | null {
   return parsed
 }
 
+/** Turn `my_cool-script` into a readable title (hyphens/underscores → spaces, word caps). */
+function humanTitleFromStem(stem: string): string {
+  const spaced = stem
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!spaced) return 'Script'
+  return spaced
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
+function mergeFormWithLuaFile(form: DraftForm, filename: string, raw: string): DraftForm {
+  const parsedHeader = parseUmbrellaHeader(raw)
+  const body = parsedHeader ? stripFirstLine(raw) : raw
+  const stem = filename.replace(/\.lua$/i, '')
+  return {
+    ...form,
+    filename,
+    body,
+    contentVersion: parsedHeader ? String(parsedHeader.version) : form.contentVersion,
+    title: form.title.trim() ? form.title : humanTitleFromStem(stem),
+    slug: form.slug.trim() ? form.slug : slugifyFilename(filename),
+  }
+}
+
+function LuaScriptDropCard({
+  disabled,
+  busy,
+  filename,
+  onApplyFile,
+  onBrowse,
+  onWrongType,
+}: {
+  disabled: boolean
+  busy: boolean
+  filename: string
+  onApplyFile: (name: string, text: string) => void
+  onBrowse: () => void
+  onWrongType: () => void
+}): ReactElement {
+  const [dragDepth, setDragDepth] = useState(0)
+  const dragActive = dragDepth > 0
+
+  async function handleDrop(e: DragEvent<HTMLDivElement>): Promise<void> {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragDepth(0)
+    const f = e.dataTransfer.files?.[0]
+    if (!f) return
+    if (!f.name.toLowerCase().endsWith('.lua')) {
+      onWrongType()
+      return
+    }
+    const text = await f.text()
+    onApplyFile(f.name, text)
+  }
+
+  return (
+    <div
+      className={`lua-drop-zone${dragActive ? ' drag-active' : ''}`}
+      role="group"
+      aria-label="Lua script file"
+      onDragEnter={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragDepth((d) => d + 1)
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragDepth((d) => Math.max(0, d - 1))
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+      onDrop={(e) => void handleDrop(e)}
+    >
+      <svg className="lua-drop-zone-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+        <path d="M10 4v8M6 9l4-4 4 4" />
+        <path d="M3 15h14" />
+      </svg>
+      <span className="lua-drop-zone-title">Drop .lua here</span>
+      <span className="lua-drop-zone-sub">Title, slug, version, and source update from the file when fields are empty (version also reads the Umbrella header).</span>
+      {filename.trim() ? (
+        <span className="lua-drop-zone-file" title={filename}>
+          {filename}
+        </span>
+      ) : null}
+      <button type="button" className="btn btn-ghost lua-drop-zone-browse" disabled={disabled || busy} onClick={() => void onBrowse()}>
+        Choose file…
+      </button>
+    </div>
+  )
+}
+
 type InstalledEntry = {
   scriptId: string
   filename: string
@@ -107,6 +208,61 @@ async function loadInstalledScripts(): Promise<InstalledEntry[]> {
       installedAt: entry.installedAt,
     }
   })
+}
+
+function SkeletonCard(): React.ReactElement {
+  return (
+    <div className="script-card" aria-hidden>
+      <div className="card-header">
+        <div className="sk" style={{ width: 34, height: 34, borderRadius: 8 }} />
+        <div className="sk" style={{ width: 52, height: 18, borderRadius: 20 }} />
+      </div>
+      <div className="sk" style={{ height: 13, width: '60%', marginTop: 10, marginBottom: 6 }} />
+      <div className="sk" style={{ height: 12, width: '42%', marginBottom: 10 }} />
+      <div className="sk" style={{ height: 12, width: '100%', marginBottom: 4 }} />
+      <div className="sk" style={{ height: 12, width: '72%', marginBottom: 10 }} />
+      <div className="card-footer">
+        <div className="sk" style={{ height: 11, width: '50%' }} />
+      </div>
+    </div>
+  )
+}
+
+function SkeletonRow(): React.ReactElement {
+  return (
+    <div className="script-row" aria-hidden style={{ pointerEvents: 'none' }}>
+      <div className="sk" style={{ width: 28, height: 28, borderRadius: 6 }} />
+      <div className="row-info">
+        <div className="sk" style={{ height: 13, width: '38%', marginBottom: 6 }} />
+        <div className="sk" style={{ height: 12, width: '60%' }} />
+      </div>
+      <div className="row-right">
+        <div className="sk" style={{ height: 22, width: 56, borderRadius: 20 }} />
+        <div className="sk" style={{ height: 11, width: 64 }} />
+      </div>
+    </div>
+  )
+}
+
+function SkeletonLibrary({ count = 4, view = 'grid' }: { count?: number; view?: 'grid' | 'list' }): React.ReactElement {
+  return (
+    <div className="page author-page" aria-hidden>
+      <div className="sk" style={{ height: 13, width: '55%', marginBottom: 16 }} />
+      <div className="section-header" style={{ marginBottom: 12 }}>
+        <div className="sk" style={{ height: 13, width: 100 }} />
+        <div className="sk" style={{ height: 12, width: 60 }} />
+      </div>
+      {view === 'grid' ? (
+        <div className="card-grid" aria-busy="true">
+          {Array.from({ length: count }, (_, i) => <SkeletonCard key={i} />)}
+        </div>
+      ) : (
+        <div className="row-list" aria-busy="true">
+          {Array.from({ length: count }, (_, i) => <SkeletonRow key={i} />)}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function InstalledLibraryView(): React.ReactElement {
@@ -151,13 +307,17 @@ function InstalledLibraryView(): React.ReactElement {
       </div>
 
       {loading ? (
-        <div className={libraryView === 'grid' ? 'card-grid' : 'row-list'} aria-busy="true">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="script-card skeleton-card" />
-          ))}
-        </div>
+        libraryView === 'grid' ? (
+          <div className="card-grid" aria-busy="true">
+            {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+          </div>
+        ) : (
+          <div className="row-list" aria-busy="true">
+            {[1, 2, 3].map((i) => <SkeletonRow key={i} />)}
+          </div>
+        )
       ) : libraryView === 'grid' ? (
-        <div className="card-grid" aria-label="Installed scripts">
+        <div className="card-grid fade-in" aria-label="Installed scripts">
           {filtered.map((e) => {
             const inner = (
               <>
@@ -192,7 +352,7 @@ function InstalledLibraryView(): React.ReactElement {
           )}
         </div>
       ) : (
-        <div className="row-list" aria-label="Installed scripts">
+        <div className="row-list fade-in" aria-label="Installed scripts">
           {filtered.map((e) => {
             const inner = (
               <>
@@ -232,7 +392,7 @@ export function AuthorPage(): React.ReactElement {
   const { user, canOpenAuthorStudio, canOpenAuthorStudioLoading, loading: authLoading } = useAuth()
 
   if (authLoading || canOpenAuthorStudioLoading) {
-    return <div className="page-loading">Loading…</div>
+    return <SkeletonLibrary count={3} />
   }
 
   if (!user || !canOpenAuthorStudio) {
@@ -244,14 +404,15 @@ export function AuthorPage(): React.ReactElement {
 
 function AuthorStudio(): React.ReactElement {
   const { user, role } = useAuth()
+  const { addToast } = useToast()
   const canCreateScripts = ['author', 'moderator', 'admin'].includes(role)
   const { librarySearch, libraryView, libraryNewDraft, setLibraryNewDraft } =
     useOutletContext<VaultOutletContext>()
 
   const [mine, setMine] = useState<ScriptRow[]>([])
+  const [mineLoading, setMineLoading] = useState(true)
   const [form, setForm] = useState<DraftForm>(emptyForm)
   const [tagInput, setTagInput] = useState('')
-  const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState<PageMode>('list')
   const [tabFilter, setTabFilter] = useState<TabFilter>('all')
@@ -264,25 +425,38 @@ function AuthorStudio(): React.ReactElement {
       .select('*')
       .eq('author_id', user.id)
       .order('updated_at', { ascending: false })
-    if (e1) { setMsg(e1.message); return }
+    if (e1) {
+      addToast(userFacingMessage(e1), 'error')
+      setMineLoading(false)
+      return
+    }
     const list: ScriptRow[] = [...((authored as ScriptRow[]) ?? [])]
     const byId = new Map(list.map((r) => [r.id, r]))
     const { data: coRows, error: e2 } = await supabase
       .from('script_coauthors')
       .select('script_id')
       .eq('profile_id', user.id)
-    if (e2) { setMsg(e2.message); return }
+    if (e2) {
+      addToast(userFacingMessage(e2), 'error')
+      setMineLoading(false)
+      return
+    }
     const coIds = [...new Set((coRows ?? []).map((r: { script_id: string }) => r.script_id))]
     if (coIds.length) {
       const { data: coScripts, error: e3 } = await supabase.from('scripts').select('*').in('id', coIds)
-      if (e3) { setMsg(e3.message); return }
+      if (e3) {
+        addToast(userFacingMessage(e3), 'error')
+        setMineLoading(false)
+        return
+      }
       for (const row of (coScripts as ScriptRow[]) ?? []) {
         if (!byId.has(row.id)) { byId.set(row.id, row); list.push(row) }
       }
     }
     list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
     setMine(list)
-  }, [user])
+    setMineLoading(false)
+  }, [user, addToast])
 
   useEffect(() => { void loadMine() }, [loadMine])
 
@@ -291,7 +465,6 @@ function AuthorStudio(): React.ReactElement {
     if (libraryNewDraft) {
       setForm(emptyForm)
       setTagInput('')
-      setMsg(null)
       setMode('edit')
       setLibraryNewDraft(false)
     }
@@ -331,14 +504,12 @@ function AuthorStudio(): React.ReactElement {
       status: r.status,
     })
     setTagInput('')
-    setMsg(null)
     setMode('edit')
   }
 
   function openNew(): void {
     setForm(emptyForm)
     setTagInput('')
-    setMsg(null)
     setMode('edit')
   }
 
@@ -363,36 +534,26 @@ function AuthorStudio(): React.ReactElement {
   }
 
   async function pickLuaFromDisk(): Promise<void> {
-    setMsg(null)
     const res = await window.umbrella.pickLuaScriptFile()
     if (res === null) return
-    if ('error' in res) { setMsg(res.error); return }
-    const raw = res.content
-    const parsedHeader = parseUmbrellaHeader(raw)
-    const body = parsedHeader ? stripFirstLine(raw) : raw
-    const stem = res.filename.replace(/\.lua$/i, '')
-    setForm((f) => ({
-      ...f,
-      filename: res.filename,
-      body,
-      contentVersion: parsedHeader ? String(parsedHeader.version) : f.contentVersion,
-      title: f.title.trim() ? f.title : stem,
-      slug: f.slug.trim() ? f.slug : slugifyFilename(res.filename),
-    }))
+    if ('error' in res) {
+      addToast(res.error, 'error')
+      return
+    }
+    setForm((f) => mergeFormWithLuaFile(f, res.filename, res.content))
   }
 
   async function saveDraft(): Promise<void> {
     if (!supabase || !user) return
     if (!form.id && !canCreateScripts) {
-      setMsg('Only primary authors can create new scripts. Coauthors can edit scripts they are assigned to.')
+      addToast('Only primary authors can create new scripts. Coauthors can edit scripts they are assigned to.', 'error')
       return
     }
     setBusy(true)
-    setMsg(null)
     try {
       const contentVersion = parseContentVersion(form.contentVersion)
       if (!contentVersion) {
-        setMsg('Version must be a positive number (examples: 0.5, 1.2, 4.2).')
+        addToast('Version must be a positive number (examples: 0.5, 1.2, 4.2).', 'error')
         return
       }
       const lua_source = form.body
@@ -404,14 +565,21 @@ function AuthorStudio(): React.ReactElement {
           description: form.description.trim() || null, category: form.category.trim() || null,
           tags, changelog: form.changelog.trim() || null, lua_source,
         }).eq('id', form.id).select('content_version').single()
-        if (error) { setMsg(error.message); return }
+        if (error) {
+          addToast(userFacingMessage(error), 'error')
+          return
+        }
 
         const newVersion = (updated as { content_version: number }).content_version
         if (form.changelog.trim()) {
-          await supabase.from('script_changelog').upsert(
+          const { error: chErr } = await supabase.from('script_changelog').upsert(
             { script_id: form.id, version: newVersion, body: form.changelog.trim() },
             { onConflict: 'script_id,version' }
           )
+          if (chErr) {
+            addToast(userFacingMessage(chErr), 'error')
+            return
+          }
         }
       } else {
         const { data, error } = await supabase.from('scripts').insert({
@@ -421,10 +589,13 @@ function AuthorStudio(): React.ReactElement {
           tags, changelog: form.changelog.trim() || null, lua_source,
           status: 'draft' as const, author_id: user.id,
         }).select('id').single()
-        if (error) { setMsg(error.message); return }
+        if (error) {
+          addToast(userFacingMessage(error), 'error')
+          return
+        }
         setForm((f) => ({ ...f, id: (data as { id: string }).id, status: 'draft' }))
       }
-      setMsg('Saved draft.')
+      addToast('Saved draft.', 'success')
       await loadMine()
     } finally {
       setBusy(false)
@@ -432,14 +603,19 @@ function AuthorStudio(): React.ReactElement {
   }
 
   async function submitReview(): Promise<void> {
-    if (!supabase || !form.id) { setMsg('Save a draft first.'); return }
+    if (!supabase || !form.id) {
+      addToast('Save a draft first.', 'error')
+      return
+    }
     setBusy(true)
-    setMsg(null)
     try {
       const { error } = await supabase.from('scripts').update({ status: 'pending_review' }).eq('id', form.id)
-      if (error) { setMsg(error.message); return }
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
       setForm((f) => ({ ...f, status: 'pending_review' }))
-      setMsg('Submitted for review.')
+      addToast('Submitted for review.', 'success')
       await loadMine()
     } finally {
       setBusy(false)
@@ -449,23 +625,29 @@ function AuthorStudio(): React.ReactElement {
   async function deleteDraft(id: string): Promise<void> {
     if (!supabase || !confirm('Delete this draft?')) return
     const { error } = await supabase.from('scripts').delete().eq('id', id)
-    if (error) { setMsg(error.message); return }
+    if (error) {
+      addToast(userFacingMessage(error), 'error')
+      return
+    }
     if (form.id === id) { setForm(emptyForm); setTagInput('') }
+    addToast('Script deleted.', 'success')
     await loadMine()
     setMode('list')
   }
 
   /* ── LIST MODE ── */
   if (mode === 'list') {
+    if (mineLoading) {
+      return <SkeletonLibrary count={4} view={libraryView} />
+    }
+
     return (
-      <div className="page author-page">
+      <div className="page author-page fade-in">
         {!canCreateScripts && (
           <p className="store-lead muted">
             Coauthor access: open an assigned script to edit. You cannot create new drafts.
           </p>
         )}
-        {msg && <p className="error feedback" style={{ marginBottom: 12 }}>{msg}</p>}
-
         <div className="lib-filters">
           <div className="tab-seg">
             {(['all', 'draft', 'pending_review', 'published'] as TabFilter[]).map((t) => (
@@ -583,18 +765,9 @@ function AuthorStudio(): React.ReactElement {
   /* ── EDIT MODE ── */
   return (
     <div className="page author-page">
-      <button type="button" className="author-back" onClick={() => { setMode('list'); setMsg(null) }}>
+      <button type="button" className="author-back" onClick={() => { setMode('list') }}>
         ← Library
       </button>
-
-      {msg && (
-        <p
-          className={`feedback ${msg.includes('Saved') || msg.includes('Submitted') ? 'success' : 'error'}`}
-          style={{ marginBottom: 12 }}
-        >
-          {msg}
-        </p>
-      )}
 
       <div className="author-panel">
         <div className="settings-section-title" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -604,46 +777,60 @@ function AuthorStudio(): React.ReactElement {
           )}
         </div>
 
-        <div className="form-grid">
-          <label className="field">
-            <span>Slug (URL)</span>
-            <input className="field-input" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Title</span>
-            <input className="field-input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          </label>
-          <label className="field full">
-            <span>Filename</span>
-            <input
-              className="field-input"
-              value={form.filename}
-              onChange={(e) => setForm({ ...form, filename: e.target.value })}
-              placeholder="my_script.lua"
-            />
-          </label>
-          <label className="field">
-            <span>Version</span>
-            <input
-              className="field-input"
-              type="number"
-              inputMode="numeric"
-              min={0.1}
-              step={0.1}
-              value={form.contentVersion}
-              onChange={(e) => setForm({ ...form, contentVersion: e.target.value })}
-              placeholder="1.0"
-            />
-          </label>
-          <label className="field full">
-            <span>Category</span>
-            <input
-              className="field-input"
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
-              placeholder="e.g. QoL"
-            />
-          </label>
+        <div className="draft-meta-split">
+          <div className="draft-meta-fields">
+            <div className="form-grid">
+              <label className="field">
+                <span>Slug (URL)</span>
+                <input className="field-input" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>Title</span>
+                <input className="field-input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              </label>
+              <label className="field full">
+                <span>Filename</span>
+                <input
+                  className="field-input"
+                  value={form.filename}
+                  onChange={(e) => setForm({ ...form, filename: e.target.value })}
+                  placeholder="my_script.lua"
+                />
+              </label>
+              <label className="field">
+                <span>Version</span>
+                <input
+                  className="field-input"
+                  type="number"
+                  inputMode="numeric"
+                  min={0.1}
+                  step={0.1}
+                  value={form.contentVersion}
+                  onChange={(e) => setForm({ ...form, contentVersion: e.target.value })}
+                  placeholder="1.0"
+                />
+              </label>
+              <label className="field full">
+                <span>Category</span>
+                <input
+                  className="field-input"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  placeholder="e.g. QoL"
+                />
+              </label>
+            </div>
+          </div>
+          <LuaScriptDropCard
+            disabled={busy}
+            busy={busy}
+            filename={form.filename}
+            onWrongType={() => addToast('Please drop a .lua file.', 'error')}
+            onApplyFile={(name, text) => {
+              setForm((f) => mergeFormWithLuaFile(f, name, text))
+            }}
+            onBrowse={() => void pickLuaFromDisk()}
+          />
         </div>
 
         <div style={{ marginTop: 12 }}>
@@ -694,14 +881,9 @@ function AuthorStudio(): React.ReactElement {
         </label>
 
         <div className="field full">
-          <div className="row gap wrap" style={{ alignItems: 'center', marginBottom: '0.35rem' }}>
-            <span className="setting-label">Lua source</span>
-            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void pickLuaFromDisk()}>
-              Upload .lua…
-            </button>
-          </div>
-          <p className="muted small" style={{ margin: '0 0 0.5rem' }}>
-            Store header line is added automatically when you save.
+          <span className="setting-label">Lua source</span>
+          <p className="muted small" style={{ margin: '0.35rem 0 0.5rem' }}>
+            Drag a file onto the panel above or use Choose file. The store header line is added automatically when you save.
           </p>
           <textarea rows={14} className="code" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} />
         </div>

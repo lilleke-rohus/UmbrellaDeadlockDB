@@ -4,6 +4,39 @@ import { useCatalog } from '../hooks/useCatalog'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconRowScript, IconScriptTile } from '../components/NavIcons'
 
+function SkeletonCard(): React.ReactElement {
+  return (
+    <div className="script-card" aria-hidden>
+      <div className="card-header">
+        <div className="sk" style={{ width: 34, height: 34, borderRadius: 8 }} />
+        <div className="sk" style={{ width: 38, height: 18, borderRadius: 20 }} />
+      </div>
+      <div className="sk" style={{ height: 13, width: '65%', marginTop: 10, marginBottom: 6 }} />
+      <div className="sk" style={{ height: 12, width: '40%', marginBottom: 10 }} />
+      <div className="sk" style={{ height: 12, width: '100%', marginBottom: 4 }} />
+      <div className="sk" style={{ height: 12, width: '75%', marginBottom: 10 }} />
+      <div className="card-footer">
+        <div className="sk" style={{ height: 11, width: '55%' }} />
+      </div>
+    </div>
+  )
+}
+
+function SkeletonRow(): React.ReactElement {
+  return (
+    <div className="script-row" aria-hidden style={{ pointerEvents: 'none' }}>
+      <div className="sk" style={{ width: 28, height: 28, borderRadius: 6 }} />
+      <div className="row-info">
+        <div className="sk" style={{ height: 13, width: '38%', marginBottom: 6 }} />
+        <div className="sk" style={{ height: 12, width: '62%' }} />
+      </div>
+      <div className="row-right">
+        <div className="sk" style={{ height: 11, width: 72 }} />
+      </div>
+    </div>
+  )
+}
+
 function formatUpdated(iso: string): string {
   try {
     const d = new Date(iso)
@@ -128,13 +161,17 @@ export function HomePage(): React.ReactElement {
       {error && !items.length && <p className="error">{error}</p>}
 
       {loading && !items.length ? (
-        <div className={storeView === 'grid' ? 'card-grid' : 'row-list'} aria-busy="true">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="script-card skeleton-card" />
-          ))}
-        </div>
+        storeView === 'grid' ? (
+          <div className="card-grid" aria-busy="true">
+            {[1, 2, 3, 4, 5, 6].map((i) => <SkeletonCard key={i} />)}
+          </div>
+        ) : (
+          <div className="row-list" aria-busy="true">
+            {[1, 2, 3, 4, 5, 6].map((i) => <SkeletonRow key={i} />)}
+          </div>
+        )
       ) : storeView === 'grid' ? (
-        <div className="card-grid" aria-label="Scripts">
+        <div className="card-grid fade-in" aria-label="Scripts">
           {sorted.map((s) => (
             <Link key={s.id} to={`/script/${s.slug}`} className="script-card">
               <div className="card-header">
@@ -166,7 +203,7 @@ export function HomePage(): React.ReactElement {
           ))}
         </div>
       ) : (
-        <div className="row-list" aria-label="Scripts">
+        <div className="row-list fade-in" aria-label="Scripts">
           {sorted.map((s) => (
             <Link key={s.id} to={`/script/${s.slug}`} className="script-row">
               <div className="row-icon">
