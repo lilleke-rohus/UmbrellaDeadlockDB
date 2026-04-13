@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { InstallManifest, ManifestEntry } from '../../shared/ipc'
+import type { InstallManifest, ManifestEntry } from '../../../shared/ipc'
 
 export type AutoUpdateResult = {
   updated: number

@@ -229,7 +229,7 @@ function InstalledLibraryView(): React.ReactElement {
 }
 
 export function AuthorPage(): React.ReactElement {
-  const { user, role, canOpenAuthorStudio, canOpenAuthorStudioLoading, loading: authLoading } = useAuth()
+  const { user, canOpenAuthorStudio, canOpenAuthorStudioLoading, loading: authLoading } = useAuth()
 
   if (authLoading || canOpenAuthorStudioLoading) {
     return <div className="page-loading">Loading…</div>
