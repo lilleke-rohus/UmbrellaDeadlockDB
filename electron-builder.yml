@@ -2,9 +2,15 @@ appId: com.umbrella.deadlock-db
 productName: Umbrella Deadlock DB
 copyright: Copyright © 2025
 
+# Drop unused `locales/*.pak` from the Electron bundle (large folder). Add codes if you ship more languages.
+electronLanguages:
+  - en-US
+
 directories:
   buildResources: build
   output: dist
+
+afterPack: ./scripts/after-pack-remove-license-files.cjs
 
 files:
   - out/**/*
