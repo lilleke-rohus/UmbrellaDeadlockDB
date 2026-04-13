@@ -2,12 +2,26 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import electronUpdater from 'electron-updater'
-
-const { autoUpdater } = electronUpdater
 import { IPC_CHANNELS, type PickLuaScriptFileResult } from '../shared/ipc'
 import { resolveUnderRoot } from './paths'
 import { readManifest, readSettings, upsertManifestEntry, writeSettings } from './store'
 import type { ManifestEntry } from '../shared/ipc'
+
+const { autoUpdater } = electronUpdater
+
+// Dev: use a separate profile + explicit disk cache dir to avoid Windows "Unable to move the cache"
+// / profile locks under the default Roaming folder (AV, stale locks, OneDrive, etc.).
+if (process.env.ELECTRON_RENDERER_URL) {
+  const devUserData = path.join(app.getPath('appData'), 'umbrella-deadlock-db-dev')
+  app.setPath('userData', devUserData)
+  const diskCacheDir = path.join(devUserData, 'chromium-disk-cache')
+  try {
+    mkdirSync(diskCacheDir, { recursive: true })
+    app.commandLine.appendSwitch('disk-cache-dir', diskCacheDir)
+  } catch {
+    // Still prefer isolated userData even if cache dir cannot be created.
+  }
+}
 
 function setupAutoUpdater(win: BrowserWindow): void {
   autoUpdater.autoDownload = true
@@ -65,7 +79,11 @@ function createWindow(): BrowserWindow {
       sandbox: false
     }
   })
-  win.on('ready-to-show', () => {
+
+  let didReveal = false
+  const revealMainWindow = (): void => {
+    if (didReveal || win.isDestroyed()) return
+    didReveal = true
     win.show()
     const { autoUpdateScripts } = readSettings()
     if (autoUpdateScripts) {
@@ -74,6 +92,20 @@ function createWindow(): BrowserWindow {
     if (!process.env.ELECTRON_RENDERER_URL) {
       setTimeout(() => void autoUpdater.checkForUpdates(), 3000)
     }
+  }
+
+  win.once('ready-to-show', revealMainWindow)
+  // On some Windows setups `ready-to-show` never fires even though the page loads; still show UI.
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      if (!win.isDestroyed() && !win.isVisible()) {
+        revealMainWindow()
+      }
+    }, 500)
+  })
+  win.webContents.once('did-fail-load', (_e, code, desc, url) => {
+    console.error('[main] did-fail-load', { code, desc, url })
+    revealMainWindow()
   })
 
   ipcMain.handle(IPC_CHANNELS.windowMinimize, () => { win.minimize() })
