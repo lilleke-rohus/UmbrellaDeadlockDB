@@ -1,0 +1,115 @@
+import { supabase } from './supabase'
+import type { InstallManifest, ManifestEntry } from '../../shared/ipc'
+
+export type AutoUpdateResult = {
+  updated: number
+  skipped: number
+  errors: string[]
+}
+
+const VERSION_EPSILON = 0.000001
+
+function getManifestEntry(manifest: InstallManifest, scriptId: string): ManifestEntry | undefined {
+  return manifest.entries[scriptId] ?? Object.values(manifest.entries).find((entry) => entry.scriptId === scriptId)
+}
+
+function shouldUpdate(
+  local: ManifestEntry,
+  remote: { content_version: number; updated_at: string }
+): boolean {
+  const localVersion = Number(local.contentVersion)
+  const remoteVersion = Number(remote.content_version)
+  if (Number.isFinite(localVersion) && Number.isFinite(remoteVersion)) {
+    if (remoteVersion - localVersion > VERSION_EPSILON) {
+      return true
+    }
+  } else if (remote.content_version !== local.contentVersion) {
+    return true
+  }
+
+  const localUpdatedAt = Date.parse(local.updatedAt)
+  const remoteUpdatedAt = Date.parse(remote.updated_at)
+  if (Number.isFinite(localUpdatedAt) && Number.isFinite(remoteUpdatedAt)) {
+    return remoteUpdatedAt > localUpdatedAt
+  }
+
+  return remote.updated_at > local.updatedAt
+}
+
+/**
+ * Compares every entry in the install manifest against the published store version.
+ * Downloads and overwrites any script whose content_version or updated_at is newer.
+ */
+export async function runAutoUpdate(): Promise<AutoUpdateResult> {
+  if (!supabase) {
+    return { updated: 0, skipped: 0, errors: ['Supabase not configured'] }
+  }
+
+  const manifest = await window.umbrella.getManifest()
+  const entries = Object.values(manifest.entries)
+
+  if (entries.length === 0) {
+    return { updated: 0, skipped: 0, errors: [] }
+  }
+
+  const ids = entries.map((e) => e.scriptId)
+
+  const { data: scripts, error } = await supabase
+    .from('scripts')
+    .select('id, filename, content_version, updated_at, lua_source')
+    .in('id', ids)
+    .eq('status', 'published')
+
+  if (error) {
+    return { updated: 0, skipped: 0, errors: [error.message] }
+  }
+
+  if (!scripts || scripts.length === 0) {
+    return { updated: 0, skipped: entries.length, errors: [] }
+  }
+
+  let updated = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  for (const row of scripts) {
+    const entry = getManifestEntry(manifest, row.id)
+    if (!entry) continue
+
+    const needsUpdate = shouldUpdate(entry, row)
+
+    if (!needsUpdate) {
+      skipped++
+      continue
+    }
+
+    if (!row.lua_source) {
+      skipped++
+      continue
+    }
+
+    const writeRes = await window.umbrella.writeScript(row.filename, row.lua_source)
+    if (!writeRes.ok) {
+      errors.push(`${row.filename}: ${writeRes.error ?? 'write failed'}`)
+      continue
+    }
+
+    await window.umbrella.setManifestEntry(row.id, {
+      scriptId: row.id,
+      filename: row.filename,
+      contentVersion: row.content_version,
+      updatedAt: row.updated_at,
+      installedAt: entry.installedAt,
+    })
+
+    updated++
+  }
+
+  // Scripts in manifest that were not found in the published store are skipped silently
+  const storeIds = new Set(scripts.map((s) => s.id))
+  for (const e of entries) {
+    if (!storeIds.has(e.scriptId)) skipped++
+  }
+
+  return { updated, skipped, errors }
+}

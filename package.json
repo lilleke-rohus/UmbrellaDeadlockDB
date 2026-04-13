@@ -1,0 +1,40 @@
+{
+  "name": "umbrella-deadlock-db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "release": "electron-vite build && electron-builder --publish always",
+    "preview": "electron-vite preview",
+    "db:login": "supabase login",
+    "db:link": "supabase link",
+    "db:link:deadlock": "supabase link --project-ref dxmqljuqewprvexdbucv",
+    "db:push": "supabase db push",
+    "db:pull": "supabase db pull",
+    "db:migrations": "supabase migration list"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.10.2",
+    "@supabase/supabase-js": "^2.103.0",
+    "dexie": "^4.0.11",
+    "electron-updater": "^6.8.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "electron": "^35.1.5",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^3.1.0",
+    "supabase": "^2.89.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.4"
+  }
+}

@@ -1,0 +1,28 @@
+appId: com.umbrella.deadlock-db
+productName: Umbrella Deadlock DB
+copyright: Copyright © 2025
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - out/**/*
+  - node_modules/**/*
+  - package.json
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+publish:
+  provider: github
+  owner: lilleke-rohus
+  repo: UmbrellaDeadlockDB
+  private: false

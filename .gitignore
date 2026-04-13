@@ -1,0 +1,61 @@
+# Dependencies
+node_modules
+
+# Build / packaging (electron-vite + electron-builder)
+out
+dist
+release
+
+# Environment and secrets (keep .env.example committed)
+.env
+.env.*
+!.env.example
+
+# Logs and debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Supabase CLI local state (versions, linked project ref, pooler URL, etc.)
+supabase/.temp
+supabase/.branches
+
+# Local database files and dumps (never ship real data)
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+*.dump
+*.sql.gz
+*.backup
+pgdata/
+postgres-data/
+
+# Test / coverage
+coverage
+.nyc_output
+
+# TypeScript / tooling caches
+*.tsbuildinfo
+.turbo
+.cache
+.parcel-cache
+.vite
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors (personal machine state; optional — remove if you commit shared settings)
+.idea
+*.swp
+*.swo
+*~
+
+# Project-specific
+docs
+supabase
