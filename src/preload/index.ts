@@ -33,11 +33,14 @@ const api: IpcApi = {
   },
   // App self-update
   checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.appCheckForUpdates),
+  downloadAppUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.appDownloadUpdate),
   installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.appInstallUpdate),
   onAppUpdateAvailable: (handler) => makeListener<AppUpdateInfo>(IPC_CHANNELS.appUpdateAvailable, handler),
   onAppUpdateDownloadProgress: (handler) => makeListener<AppUpdateProgress>(IPC_CHANNELS.appUpdateDownloadProgress, handler),
   onAppUpdateDownloaded: (handler) => makeListener<AppUpdateInfo>(IPC_CHANNELS.appUpdateDownloaded, handler),
   onAppUpdateError: (handler) => makeListener<string>(IPC_CHANNELS.appUpdateError, handler),
+  getPendingAuthDeepLink: () => ipcRenderer.invoke(IPC_CHANNELS.getPendingAuthDeepLink),
+  onAuthDeepLink: (handler) => makeListener<string>(IPC_CHANNELS.authDeepLink, handler),
 }
 
 contextBridge.exposeInMainWorld('umbrella', api)

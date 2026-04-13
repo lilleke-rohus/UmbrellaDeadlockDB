@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type Dispatch, type ReactElement, type SetStateAction } from 'react'
 import type { AppUpdateInfo, AppUpdateProgress } from '../../../shared/ipc'
 
 type UpdateState =
@@ -8,102 +8,150 @@ type UpdateState =
   | { phase: 'ready'; info: AppUpdateInfo }
   | { phase: 'error'; message: string }
 
-export function UpdateNotifier(): React.ReactElement | null {
+type VisibleUpdateState = Exclude<UpdateState, { phase: 'idle' }>
+
+const COLORS = {
+  accent: '#3b82f6',
+  success: '#4ade80',
+  danger: '#f87171',
+} as const
+
+const FALLBACK_VERSION_INFO: AppUpdateInfo = { version: '' }
+
+export function UpdateNotifier(): ReactElement | null {
   const [state, setState] = useState<UpdateState>({ phase: 'idle' })
   const [dismissed, setDismissed] = useState(false)
 
-  useEffect(() => {
-    const unsubs = [
-      window.umbrella.onAppUpdateAvailable((info) => {
-        setState({ phase: 'available', info })
-        setDismissed(false)
-      }),
-      window.umbrella.onAppUpdateDownloadProgress((progress) => {
-        setState((prev) => {
-          const info = prev.phase === 'available' || prev.phase === 'downloading'
-            ? prev.info
-            : { version: '' }
-          return { phase: 'downloading', info, progress }
-        })
-      }),
-      window.umbrella.onAppUpdateDownloaded((info) => {
-        setState({ phase: 'ready', info })
-      }),
-      window.umbrella.onAppUpdateError((message) => {
-        setState({ phase: 'error', message })
-      }),
-    ]
-    return () => unsubs.forEach((u) => u())
-  }, [])
+  useEffect(() => subscribeAppUpdateEvents(setState, setDismissed), [])
 
   if (dismissed || state.phase === 'idle') return null
 
   return (
     <div style={styles.banner} role="status" aria-live="polite">
-      <BannerContent state={state} onDismiss={() => setDismissed(true)} />
+      <UpdateBannerView state={state} onDismiss={() => setDismissed(true)} />
     </div>
   )
 }
 
-function BannerContent({
+function subscribeAppUpdateEvents(
+  setState: Dispatch<SetStateAction<UpdateState>>,
+  setDismissed: Dispatch<SetStateAction<boolean>>,
+): () => void {
+  const unsubs = [
+    window.umbrella.onAppUpdateAvailable((info) => {
+      setState({ phase: 'available', info })
+      setDismissed(false)
+    }),
+    window.umbrella.onAppUpdateDownloadProgress((progress) => {
+      setState((prev) => withDownloadProgress(prev, progress))
+    }),
+    window.umbrella.onAppUpdateDownloaded((info) => {
+      setState({ phase: 'ready', info })
+    }),
+    window.umbrella.onAppUpdateError((message) => {
+      setState({ phase: 'error', message })
+    }),
+  ]
+  return () => unsubs.forEach((u) => u())
+}
+
+function withDownloadProgress(prev: UpdateState, progress: AppUpdateProgress): UpdateState {
+  return { phase: 'downloading', info: updateInfoForProgress(prev), progress }
+}
+
+function updateInfoForProgress(prev: UpdateState): AppUpdateInfo {
+  if (prev.phase === 'available' || prev.phase === 'downloading') return prev.info
+  return FALLBACK_VERSION_INFO
+}
+
+function UpdateBannerView({
   state,
   onDismiss,
 }: {
-  state: Exclude<UpdateState, { phase: 'idle' }>
+  state: VisibleUpdateState
   onDismiss: () => void
-}): React.ReactElement {
-  if (state.phase === 'available') {
-    return (
-      <>
-        <span style={styles.dot} aria-hidden />
-        <span style={styles.text}>
-          Update <strong>v{state.info.version}</strong> available — downloading…
-        </span>
-        <button type="button" onClick={onDismiss} style={styles.dismiss} aria-label="Dismiss">×</button>
-      </>
-    )
+}): ReactElement {
+  switch (state.phase) {
+    case 'available':
+      return <AvailableBanner info={state.info} onDismiss={onDismiss} />
+    case 'downloading':
+      return <DownloadingBanner info={state.info} progress={state.progress} />
+    case 'ready':
+      return <ReadyBanner info={state.info} onDismiss={onDismiss} />
+    case 'error':
+      return <ErrorBanner message={state.message} onDismiss={onDismiss} />
   }
+}
 
-  if (state.phase === 'downloading') {
-    const pct = Math.round(state.progress.percent)
-    return (
-      <>
-        <span style={styles.dot} aria-hidden />
-        <span style={styles.text}>Downloading v{state.info.version}…</span>
-        <div style={styles.progressTrack} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-          <div style={{ ...styles.progressFill, width: `${pct}%` }} />
-        </div>
-        <span style={styles.pct}>{pct}%</span>
-      </>
-    )
-  }
-
-  if (state.phase === 'ready') {
-    return (
-      <>
-        <span style={{ ...styles.dot, background: '#4ade80' }} aria-hidden />
-        <span style={styles.text}>
-          <strong>v{state.info.version}</strong> ready — restart to install
-        </span>
-        <button
-          type="button"
-          style={styles.btnPrimary}
-          onClick={() => void window.umbrella.installUpdate()}
-        >
-          Restart now
-        </button>
-        <button type="button" onClick={onDismiss} style={styles.dismiss} aria-label="Dismiss">×</button>
-      </>
-    )
-  }
-
-  // error
+function AvailableBanner({ info, onDismiss }: { info: AppUpdateInfo; onDismiss: () => void }): ReactElement {
   return (
     <>
-      <span style={{ ...styles.dot, background: '#f87171' }} aria-hidden />
-      <span style={{ ...styles.text, color: '#f87171' }}>Update failed: {state.message}</span>
-      <button type="button" onClick={onDismiss} style={styles.dismiss} aria-label="Dismiss">×</button>
+      <StatusDot color={COLORS.accent} />
+      <span style={styles.text}>
+        Update is available (<strong>v{info.version}</strong>)
+      </span>
+      <button type="button" style={styles.btnPrimary} onClick={() => void window.umbrella.downloadAppUpdate()}>
+        Update now
+      </button>
+      <DismissButton onClick={onDismiss} />
     </>
+  )
+}
+
+function DownloadingBanner({
+  info,
+  progress,
+}: {
+  info: AppUpdateInfo
+  progress: AppUpdateProgress
+}): ReactElement {
+  const pct = Math.round(progress.percent)
+  return (
+    <>
+      <StatusDot color={COLORS.accent} />
+      <span style={styles.text}>Downloading v{info.version}…</span>
+      <div style={styles.progressTrack} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div style={{ ...styles.progressFill, width: `${pct}%` }} />
+      </div>
+      <span style={styles.pct}>{pct}%</span>
+    </>
+  )
+}
+
+function ReadyBanner({ info, onDismiss }: { info: AppUpdateInfo; onDismiss: () => void }): ReactElement {
+  return (
+    <>
+      <StatusDot color={COLORS.success} />
+      <span style={styles.text}>
+        <strong>v{info.version}</strong> ready — restart to install
+      </span>
+      <button type="button" style={styles.btnPrimary} onClick={() => void window.umbrella.installUpdate()}>
+        Restart now
+      </button>
+      <DismissButton onClick={onDismiss} />
+    </>
+  )
+}
+
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }): ReactElement {
+  return (
+    <>
+      <StatusDot color={COLORS.danger} />
+      <span style={{ ...styles.text, color: COLORS.danger }}>Update failed: {message}</span>
+      <DismissButton onClick={onDismiss} />
+    </>
+  )
+}
+
+function StatusDot({ color }: { color: string }): ReactElement {
+  return <span style={{ ...styles.dot, background: color }} aria-hidden />
+}
+
+function DismissButton({ onClick }: { onClick: () => void }): ReactElement {
+  return (
+    <button type="button" onClick={onClick} style={styles.dismiss} aria-label="Dismiss">
+      ×
+    </button>
   )
 }
 
@@ -125,14 +173,15 @@ const styles = {
     fontSize: 13,
     color: 'var(--color-text-primary, #faf9f5)',
     minWidth: 280,
-    maxWidth: 480,
-    whiteSpace: 'nowrap' as const,
+    maxWidth: 520,
+    flexWrap: 'wrap' as const,
+    whiteSpace: 'normal' as const,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: '50%',
-    background: '#3b82f6',
+    background: COLORS.accent,
     flexShrink: 0,
   },
   text: {
@@ -150,7 +199,7 @@ const styles = {
   },
   progressFill: {
     height: '100%',
-    background: '#3b82f6',
+    background: COLORS.accent,
     borderRadius: 2,
     transition: 'width 0.2s ease',
   },
@@ -164,7 +213,7 @@ const styles = {
     padding: '4px 12px',
     borderRadius: 5,
     border: 'none',
-    background: '#3b82f6',
+    background: COLORS.accent,
     color: '#fff',
     fontSize: 12,
     cursor: 'pointer',

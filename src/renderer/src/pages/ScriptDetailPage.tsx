@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { ScriptRow } from '../../../shared/supabase.types'
 import { useInstallState } from '../hooks/useInstallState'
@@ -15,6 +16,7 @@ function formatDate(iso: string): string {
 
 export function ScriptDetailPage(): React.ReactElement {
   const { slug } = useParams()
+  const { user } = useAuth()
   const { addToast } = useToast()
   const [row, setRow] = useState<ScriptRow | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -136,7 +138,7 @@ export function ScriptDetailPage(): React.ReactElement {
         installedAt: new Date().toISOString()
       })
       if (!inst.ok) { setMsg(inst.error ?? 'Manifest update failed'); return }
-      if (installState === 'install' && supabase) {
+      if (installState === 'install' && supabase && user) {
         await supabase.rpc('increment_install_count', { p_script_id: row.id })
       }
       addToast('Saved to your scripts folder.', 'success')

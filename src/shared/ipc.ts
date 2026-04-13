@@ -22,11 +22,15 @@ export const IPC_CHANNELS = {
   triggerAutoUpdate: 'umbrella:trigger-auto-update',
   // App self-update
   appCheckForUpdates: 'umbrella:app-check-for-updates',
+  appDownloadUpdate: 'umbrella:app-download-update',
   appInstallUpdate: 'umbrella:app-install-update',
   appUpdateAvailable: 'umbrella:app-update-available',
   appUpdateDownloadProgress: 'umbrella:app-update-download-progress',
   appUpdateDownloaded: 'umbrella:app-update-downloaded',
   appUpdateError: 'umbrella:app-update-error',
+  /** Main → renderer: Supabase auth redirect opened this app (password recovery, etc.). */
+  authDeepLink: 'umbrella:auth-deep-link',
+  getPendingAuthDeepLink: 'umbrella:get-pending-auth-deep-link',
 } as const
 
 export type AppSettings = {
@@ -77,9 +81,13 @@ export type IpcApi = {
   onTriggerAutoUpdate: (handler: () => void) => () => void
   // App self-update
   checkForUpdates: () => Promise<void>
+  downloadAppUpdate: () => Promise<void>
   installUpdate: () => Promise<void>
   onAppUpdateAvailable: (handler: (info: AppUpdateInfo) => void) => () => void
   onAppUpdateDownloadProgress: (handler: (progress: AppUpdateProgress) => void) => () => void
   onAppUpdateDownloaded: (handler: (info: AppUpdateInfo) => void) => () => void
   onAppUpdateError: (handler: (message: string) => void) => () => void
+  /** One-shot: URL from cold start (e.g. Windows protocol launch) before the renderer subscribed. */
+  getPendingAuthDeepLink: () => Promise<string | null>
+  onAuthDeepLink: (handler: (url: string) => void) => () => void
 }

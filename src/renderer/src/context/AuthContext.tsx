@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from 'react'
 import type { ProfileRole, ProfileRow } from '../../../shared/supabase.types'
+import { getPasswordResetRedirectTo } from '../lib/authRedirect'
 import { supabase, supabaseConfigured } from '../lib/supabase'
 
 export type SignUpResult = {
@@ -33,6 +34,7 @@ const AuthContext = createContext<
   AuthState & {
     signIn: (email: string, password: string) => Promise<{ error: string | null }>
     signUp: (email: string, password: string, displayName: string) => Promise<SignUpResult>
+    requestPasswordReset: (email: string) => Promise<{ error: string | null }>
     signOut: () => Promise<void>
     refreshProfile: () => Promise<void>
   }
@@ -170,6 +172,19 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
         const pendingEmailConfirmation = !data.session
         return { error: null, pendingEmailConfirmation }
       },
+      requestPasswordReset: async (email: string) => {
+        if (!supabase) {
+          return { error: 'Supabase is not configured' }
+        }
+        const trimmed = email.trim()
+        if (!trimmed) {
+          return { error: 'Enter your email address first.' }
+        }
+        const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
+          redirectTo: getPasswordResetRedirectTo(),
+        })
+        return { error: error?.message ?? null }
+      },
       signOut: async () => {
         if (supabase) {
           await supabase.auth.signOut()
@@ -192,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
           refreshProfile: async () => {},
           signIn: async () => ({ error: 'Supabase is not configured' }),
           signUp: async () => ({ error: 'Supabase is not configured' }),
+          requestPasswordReset: async () => ({ error: 'Supabase is not configured' }),
           signOut: async () => {}
         }}
       >
@@ -206,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
 export function useAuth(): AuthState & {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, displayName: string) => Promise<SignUpResult>
+  requestPasswordReset: (email: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
 } {

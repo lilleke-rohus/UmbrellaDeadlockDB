@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import electronUpdater from 'electron-updater'
+import { APP_AUTH_PROTOCOL_SCHEME } from '../shared/authDeepLink'
 import { IPC_CHANNELS, type PickLuaScriptFileResult } from '../shared/ipc'
 import { resolveUnderRoot } from './paths'
 import { readManifest, readSettings, upsertManifestEntry, writeSettings } from './store'
@@ -9,9 +10,73 @@ import type { ManifestEntry } from '../shared/ipc'
 
 const { autoUpdater } = electronUpdater
 
-// Dev: use a separate profile + explicit disk cache dir to avoid Windows "Unable to move the cache"
-// / profile locks under the default Roaming folder (AV, stale locks, OneDrive, etc.).
-if (process.env.ELECTRON_RENDERER_URL) {
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+}
+
+let mainWindowRef: BrowserWindow | null = null
+let pendingAuthDeepLink: string | null = null
+
+function findAuthDeepLinkInArgv(argv: readonly string[]): string | null {
+  const scheme = `${APP_AUTH_PROTOCOL_SCHEME}://`
+  for (const arg of argv) {
+    if (typeof arg === 'string' && arg.startsWith(scheme)) {
+      return arg.replace(/^"+|"+$/g, '')
+    }
+  }
+  return null
+}
+
+function deliverAuthDeepLink(url: string): void {
+  const trimmed = url.trim().replace(/^"+|"+$/g, '')
+  if (!trimmed.startsWith(`${APP_AUTH_PROTOCOL_SCHEME}://`)) {
+    return
+  }
+  if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+    mainWindowRef.webContents.send(IPC_CHANNELS.authDeepLink, trimmed)
+    return
+  }
+  pendingAuthDeepLink = trimmed
+}
+
+if (gotTheLock) {
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(APP_AUTH_PROTOCOL_SCHEME, process.execPath, [path.resolve(process.argv[1])])
+    }
+  } else {
+    app.setAsDefaultProtocolClient(APP_AUTH_PROTOCOL_SCHEME)
+  }
+
+  app.on('second-instance', (_event, commandLine) => {
+    const scheme = `${APP_AUTH_PROTOCOL_SCHEME}://`
+    const urlArg = commandLine.find((arg) => typeof arg === 'string' && arg.startsWith(scheme))
+    if (urlArg) {
+      deliverAuthDeepLink(urlArg)
+    }
+    if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+      if (mainWindowRef.isMinimized()) {
+        mainWindowRef.restore()
+      }
+      mainWindowRef.focus()
+    }
+  })
+
+  if (process.platform === 'darwin') {
+    app.on('open-url', (event, url) => {
+      event.preventDefault()
+      if (url.startsWith(`${APP_AUTH_PROTOCOL_SCHEME}://`)) {
+        deliverAuthDeepLink(url)
+      }
+    })
+  }
+}
+
+// Dev + `electron-vite preview`: isolated profile avoids Windows cache / quota DB errors.
+// `ELECTRON_RENDERER_URL` is only set for `electron-vite dev`; preview still has `app.isPackaged === false`.
+// Packaged installs keep the default Roaming profile.
+if (process.env.ELECTRON_RENDERER_URL || !app.isPackaged) {
   const devUserData = path.join(app.getPath('appData'), 'umbrella-deadlock-db-dev')
   app.setPath('userData', devUserData)
   const diskCacheDir = path.join(devUserData, 'chromium-disk-cache')
@@ -24,7 +89,11 @@ if (process.env.ELECTRON_RENDERER_URL) {
 }
 
 function setupAutoUpdater(win: BrowserWindow): void {
-  autoUpdater.autoDownload = true
+  // Lets `electron-vite dev` / `preview` hit GitHub releases using `dev-app-update.yml` next to package.json.
+  // https://www.electron.build/auto-update.html#debugging
+  autoUpdater.forceDevUpdateConfig = process.env.ELECTRON_FORCE_DEV_UPDATES === '1'
+
+  autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('update-available', (info) => {
@@ -57,6 +126,10 @@ function setupAutoUpdater(win: BrowserWindow): void {
     void autoUpdater.checkForUpdates()
   })
 
+  ipcMain.handle(IPC_CHANNELS.appDownloadUpdate, () => {
+    void autoUpdater.downloadUpdate()
+  })
+
   ipcMain.handle(IPC_CHANNELS.appInstallUpdate, () => {
     autoUpdater.quitAndInstall(false, true)
   })
@@ -77,6 +150,13 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
+    }
+  })
+
+  mainWindowRef = win
+  win.on('closed', () => {
+    if (mainWindowRef === win) {
+      mainWindowRef = null
     }
   })
 
@@ -137,6 +217,10 @@ function ensureScriptsRoot(root: string): { ok: true } | { ok: false; error: str
 }
 
 app.whenReady().then(() => {
+  if (!gotTheLock) {
+    return
+  }
+
   ipcMain.handle(IPC_CHANNELS.getSettings, () => readSettings())
 
   ipcMain.handle(IPC_CHANNELS.updateSettings, (_e, patch: Partial<{ scriptsRootPath: string | null; autoUpdateScripts: boolean }>) => {
@@ -320,6 +404,17 @@ app.whenReady().then(() => {
       return { ok: false, error: msg }
     }
   })
+
+  ipcMain.handle(IPC_CHANNELS.getPendingAuthDeepLink, () => {
+    const u = pendingAuthDeepLink
+    pendingAuthDeepLink = null
+    return u
+  })
+
+  const coldStartAuthUrl = findAuthDeepLinkInArgv(process.argv)
+  if (coldStartAuthUrl) {
+    pendingAuthDeepLink = coldStartAuthUrl
+  }
 
   const win = createWindow()
   setupAutoUpdater(win)

@@ -72,7 +72,7 @@ export function HomePage(): React.ReactElement {
   return (
     <div className="page home-page">
       <p className="store-lead muted">
-        Browse Umbrella Deadlock scripts, install to your scripts folder, and stay updated.
+        Browse scripts, install them to your scripts folder, and stay updated.
       </p>
 
       <div className="filter-bar" role="group" aria-label="Category">
