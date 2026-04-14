@@ -44,24 +44,33 @@ const emptyForm: DraftForm = {
 type TabFilter = 'all' | 'draft' | 'pending_review' | 'published'
 type PageMode = 'list' | 'edit'
 
+const TAB_FILTERS: ReadonlyArray<{ value: TabFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'draft', label: 'Drafts' },
+  { value: 'pending_review', label: 'Pending' },
+  { value: 'published', label: 'Published' },
+]
+
+const STATUS_PILL_CLASS: Readonly<Record<ScriptStatus, string>> = {
+  draft: '',
+  pending_review: 'pending',
+  published: 'active',
+  rejected: 'flagged',
+}
+
+const STATUS_LABEL: Readonly<Record<ScriptStatus, string>> = {
+  draft: 'Draft',
+  pending_review: 'Pending',
+  published: 'Published',
+  rejected: 'Rejected',
+}
+
 function statusPillClass(status: ScriptStatus): string {
-  switch (status) {
-    case 'draft': return ''
-    case 'pending_review': return 'pending'
-    case 'published': return 'active'
-    case 'rejected': return 'flagged'
-    default: return ''
-  }
+  return STATUS_PILL_CLASS[status]
 }
 
 function statusLabel(status: ScriptStatus): string {
-  switch (status) {
-    case 'draft': return 'Draft'
-    case 'pending_review': return 'Pending'
-    case 'published': return 'Published'
-    case 'rejected': return 'Rejected'
-    default: return status
-  }
+  return STATUS_LABEL[status]
 }
 
 function relativeDate(iso: string): string {
@@ -109,6 +118,28 @@ function mergeFormWithLuaFile(form: DraftForm, filename: string, raw: string): D
     title: form.title.trim() ? form.title : humanTitleFromStem(stem),
     slug: form.slug.trim() ? form.slug : slugifyFilename(filename),
   }
+}
+
+function matchesTabFilter(script: ScriptRow, tabFilter: TabFilter): boolean {
+  if (tabFilter === 'all') {
+    return true
+  }
+  return script.status === tabFilter
+}
+
+function matchesCategoryFilter(script: ScriptRow, categoryFilter: string | null): boolean {
+  if (!categoryFilter) {
+    return true
+  }
+  return script.category?.toLowerCase() === categoryFilter.toLowerCase()
+}
+
+function matchesLibrarySearch(script: ScriptRow, librarySearch: string): boolean {
+  if (!librarySearch.trim()) {
+    return true
+  }
+  const query = librarySearch.toLowerCase()
+  return script.title.toLowerCase().includes(query) || script.slug.toLowerCase().includes(query)
 }
 
 function LuaScriptDropCard({
@@ -483,16 +514,12 @@ function AuthorStudio(): React.ReactElement {
   )
 
   const filtered = useMemo(() => {
-    return mine.filter((r) => {
-      if (tabFilter === 'draft' && r.status !== 'draft') return false
-      if (tabFilter === 'pending_review' && r.status !== 'pending_review') return false
-      if (tabFilter === 'published' && r.status !== 'published') return false
-      if (categoryFilter && r.category?.toLowerCase() !== categoryFilter.toLowerCase()) return false
-      if (librarySearch) {
-        const q = librarySearch.toLowerCase()
-        if (!r.title.toLowerCase().includes(q) && !r.slug.toLowerCase().includes(q)) return false
-      }
-      return true
+    return mine.filter((script) => {
+      return (
+        matchesTabFilter(script, tabFilter) &&
+        matchesCategoryFilter(script, categoryFilter) &&
+        matchesLibrarySearch(script, librarySearch)
+      )
     })
   }, [mine, tabFilter, categoryFilter, librarySearch])
 
@@ -669,14 +696,14 @@ function AuthorStudio(): React.ReactElement {
         )}
         <div className="lib-filters">
           <div className="tab-seg">
-            {(['all', 'draft', 'pending_review', 'published'] as TabFilter[]).map((t) => (
+            {TAB_FILTERS.map((tab) => (
               <button
-                key={t}
+                key={tab.value}
                 type="button"
-                className={`tab-seg-btn${tabFilter === t ? ' active' : ''}`}
-                onClick={() => setTabFilter(t)}
+                className={`tab-seg-btn${tabFilter === tab.value ? ' active' : ''}`}
+                onClick={() => setTabFilter(tab.value)}
               >
-                {t === 'all' ? 'All' : t === 'draft' ? 'Drafts' : t === 'pending_review' ? 'Pending' : 'Published'}
+                {tab.label}
               </button>
             ))}
           </div>

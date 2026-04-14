@@ -30,6 +30,16 @@ type ScriptListRow = Pick<ScriptRow, 'id' | 'slug' | 'title' | 'author_id' | 'st
   author_display_name_override?: string | null
 }
 
+function normalizeCoauthorRows(data: unknown): CoauthorRow[] {
+  type RawCoauthor = Omit<CoauthorRow, 'scripts'> & {
+    scripts: { slug: string; title: string }[] | { slug: string; title: string } | null
+  }
+  return ((data as RawCoauthor[]) ?? []).map((row) => ({
+    ...row,
+    scripts: Array.isArray(row.scripts) ? (row.scripts[0] ?? null) : row.scripts,
+  }))
+}
+
 export function AdminPage(): React.ReactElement {
   const { user } = useAuth()
   const { addToast } = useToast()
@@ -101,12 +111,7 @@ export function AdminPage(): React.ReactElement {
       addToast(userFacingMessage(error), 'error')
       return
     }
-    type RawCoauthor = Omit<CoauthorRow, 'scripts'> & { scripts: { slug: string; title: string }[] | { slug: string; title: string } | null }
-    const normalized: CoauthorRow[] = ((data as RawCoauthor[]) ?? []).map((r) => ({
-      ...r,
-      scripts: Array.isArray(r.scripts) ? (r.scripts[0] ?? null) : r.scripts,
-    }))
-    setCoauthors(normalized)
+    setCoauthors(normalizeCoauthorRows(data))
   }, [addToast])
 
   const reloadAll = useCallback(async () => {
@@ -139,15 +144,24 @@ export function AdminPage(): React.ReactElement {
     }
   }
 
+  async function runBusyTask(task: () => Promise<void>): Promise<void> {
+    setBusy(true)
+    try {
+      await task()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function saveAuthorOverride(): Promise<void> {
     if (!supabase || !overrideScriptId) {
       addToast('Select a script first.', 'error')
       return
     }
-    setBusy(true)
-    try {
+    const client = supabase
+    await runBusyTask(async () => {
       const value = overrideName.trim() || null
-      const { error } = await supabase
+      const { error } = await client
         .from('scripts')
         .update({ author_display_name_override: value })
         .eq('id', overrideScriptId)
@@ -158,16 +172,14 @@ export function AdminPage(): React.ReactElement {
       setOverrideName('')
       setOverrideScriptId('')
       await loadScripts()
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   async function clearAuthorOverride(id: string): Promise<void> {
     if (!supabase) return
-    setBusy(true)
-    try {
-      const { error } = await supabase
+    const client = supabase
+    await runBusyTask(async () => {
+      const { error } = await client
         .from('scripts')
         .update({ author_display_name_override: null })
         .eq('id', id)
@@ -176,15 +188,14 @@ export function AdminPage(): React.ReactElement {
         return
       }
       await loadScripts()
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   async function upsertSetting(): Promise<void> {
     if (!supabase || !setKey.trim()) {
       return
     }
+    const client = supabase
     let parsed: object
     try {
       parsed = JSON.parse(setValueJson) as object
@@ -192,9 +203,8 @@ export function AdminPage(): React.ReactElement {
       addToast('Setting value must be valid JSON.', 'error')
       return
     }
-    setBusy(true)
-    try {
-      const { error } = await supabase.from('admin_settings').upsert(
+    await runBusyTask(async () => {
+      const { error } = await client.from('admin_settings').upsert(
         {
           key: setKey.trim(),
           value: parsed as AdminSettingRow['value'],
@@ -210,26 +220,22 @@ export function AdminPage(): React.ReactElement {
       setSetKey('')
       setSetValueJson('{}')
       await loadSettings()
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   async function deleteSetting(key: string): Promise<void> {
     if (!supabase || !confirm(`Delete setting "${key}"?`)) {
       return
     }
-    setBusy(true)
-    try {
-      const { error } = await supabase.from('admin_settings').delete().eq('key', key)
+    const client = supabase
+    await runBusyTask(async () => {
+      const { error } = await client.from('admin_settings').delete().eq('key', key)
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
       }
       await loadSettings()
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   async function addCoauthor(): Promise<void> {
@@ -237,9 +243,9 @@ export function AdminPage(): React.ReactElement {
       addToast('Choose a script and enter a profile UUID.', 'error')
       return
     }
-    setBusy(true)
-    try {
-      const { error } = await supabase.from('script_coauthors').insert({
+    const client = supabase
+    await runBusyTask(async () => {
+      const { error } = await client.from('script_coauthors').insert({
         script_id: coScriptId,
         profile_id: coProfileId.trim()
       })
@@ -249,26 +255,22 @@ export function AdminPage(): React.ReactElement {
       }
       setCoProfileId('')
       await loadCoauthors()
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   async function removeCoauthor(id: string): Promise<void> {
     if (!supabase || !confirm('Remove this coauthor?')) {
       return
     }
-    setBusy(true)
-    try {
-      const { error } = await supabase.from('script_coauthors').delete().eq('id', id)
+    const client = supabase
+    await runBusyTask(async () => {
+      const { error } = await client.from('script_coauthors').delete().eq('id', id)
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
       }
       await loadCoauthors()
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const scriptOptions = useMemo(
@@ -277,6 +279,10 @@ export function AdminPage(): React.ReactElement {
   )
 
   const pendingCount = useMemo(() => scripts.filter((s) => s.status === 'pending_review').length, [scripts])
+  const scriptsWithOverrides = useMemo(
+    () => scripts.filter((script) => script.author_display_name_override),
+    [scripts],
+  )
 
   const stats = useMemo(
     () => [
@@ -484,11 +490,9 @@ export function AdminPage(): React.ReactElement {
             </button>
           </div>
         </div>
-        {scripts.filter((s) => s.author_display_name_override).length > 0 && (
+        {scriptsWithOverrides.length > 0 && (
           <ul className="co-list" style={{ marginTop: '1rem' }}>
-            {scripts
-              .filter((s) => s.author_display_name_override)
-              .map((s) => (
+            {scriptsWithOverrides.map((s) => (
                 <li key={s.id} className="co-card">
                   <div>
                     <strong>{s.title}</strong>
@@ -509,7 +513,7 @@ export function AdminPage(): React.ReactElement {
               ))}
           </ul>
         )}
-        {!scripts.filter((s) => s.author_display_name_override).length && (
+        {!scriptsWithOverrides.length && (
           <p className="muted" style={{ marginTop: '0.75rem' }}>No overrides set.</p>
         )}
       </section>

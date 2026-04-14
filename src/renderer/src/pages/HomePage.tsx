@@ -5,6 +5,70 @@ import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconRowScript, IconScriptTile } from '../components/NavIcons'
 
+type SortMode = 'newest' | 'oldest' | 'az' | 'za'
+type CatalogItem = ReturnType<typeof useCatalog>['items'][number]
+
+const SORT_OPTIONS: ReadonlyArray<{ value: SortMode; label: string }> = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'az', label: 'A–Z' },
+  { value: 'za', label: 'Z–A' },
+]
+
+const SORT_COMPARATORS: Readonly<Record<SortMode, (left: CatalogItem, right: CatalogItem) => number>> = {
+  newest: (left, right) => right.updated_at.localeCompare(left.updated_at),
+  oldest: (left, right) => left.updated_at.localeCompare(right.updated_at),
+  az: (left, right) => left.title.localeCompare(right.title),
+  za: (left, right) => right.title.localeCompare(left.title),
+}
+
+function collectCategories(items: CatalogItem[]): string[] {
+  const categories = new Set<string>()
+  for (const item of items) {
+    if (item.category) {
+      categories.add(item.category)
+    }
+  }
+  return [...categories].sort()
+}
+
+function matchesSearchQuery(item: CatalogItem, query: string): boolean {
+  const normalizedQuery = query.toLowerCase()
+  const matchesTag = item.tags?.some((tag) => tag.toLowerCase().includes(normalizedQuery)) ?? false
+  return (
+    item.title.toLowerCase().includes(normalizedQuery) ||
+    item.slug.toLowerCase().includes(normalizedQuery) ||
+    (item.description?.toLowerCase().includes(normalizedQuery) ?? false) ||
+    matchesTag
+  )
+}
+
+function filterCatalog(items: CatalogItem[], category: string | null, query: string): CatalogItem[] {
+  return items.filter((item) => {
+    if (category && item.category !== category) {
+      return false
+    }
+    if (!query.trim()) {
+      return true
+    }
+    return matchesSearchQuery(item, query)
+  })
+}
+
+function sortCatalog(items: CatalogItem[], sort: SortMode): CatalogItem[] {
+  return [...items].sort(SORT_COMPARATORS[sort])
+}
+
+function buildSummary(total: number, visible: number, hasFilters: boolean): string {
+  if (total === 0) {
+    return 'No scripts in catalog yet.'
+  }
+  if (hasFilters) {
+    return `${visible} of ${total} scripts`
+  }
+  return `${total} script${total === 1 ? '' : 's'}`
+}
+
 function SkeletonCard(): React.ReactElement {
   return (
     <div className="script-card" aria-hidden>
@@ -51,59 +115,20 @@ export function HomePage(): React.ReactElement {
   const { storeSearch, storeView } = useOutletContext<VaultOutletContext>()
   const { items, loading, error, online, refresh } = useCatalog()
   const [cat, setCat] = useState<string | null>(null)
-  const [sort, setSort] = useState<'newest' | 'oldest' | 'az' | 'za'>('newest')
+  const [sort, setSort] = useState<SortMode>('newest')
 
-  const q = storeSearch
+  const query = storeSearch
 
-  const categories = useMemo(() => {
-    const s = new Set<string>()
-    for (const it of items) {
-      if (it.category) {
-        s.add(it.category)
-      }
-    }
-    return [...s].sort()
-  }, [items])
+  const categories = useMemo(() => collectCategories(items), [items])
 
-  const filtered = useMemo(() => {
-    let list = items
-    if (cat) {
-      list = list.filter((i) => i.category === cat)
-    }
-    if (q.trim()) {
-      const n = q.toLowerCase()
-      list = list.filter((i) => {
-        const inTags = i.tags?.some((t) => t.toLowerCase().includes(n)) ?? false
-        return (
-          i.title.toLowerCase().includes(n) ||
-          i.slug.toLowerCase().includes(n) ||
-          (i.description?.toLowerCase().includes(n) ?? false) ||
-          inTags
-        )
-      })
-    }
-    return list
-  }, [items, q, cat])
+  const filtered = useMemo(() => filterCatalog(items, cat, query), [items, cat, query])
 
-  const sorted = useMemo(() => {
-    const list = [...filtered]
-    switch (sort) {
-      case 'oldest': return list.sort((a, b) => a.updated_at.localeCompare(b.updated_at))
-      case 'az':     return list.sort((a, b) => a.title.localeCompare(b.title))
-      case 'za':     return list.sort((a, b) => b.title.localeCompare(a.title))
-      default:       return list.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    }
-  }, [filtered, sort])
+  const sorted = useMemo(() => sortCatalog(filtered, sort), [filtered, sort])
 
   const catalogUpdateIds = useScriptUpdateHighlightSet(sorted)
 
-  const hasFilters = Boolean(cat) || q.trim().length > 0
-  const summary =
-    items.length === 0
-      ? 'No scripts in catalog yet.'
-      : hasFilters
-        ? `${filtered.length} of ${items.length} scripts`
-        : `${items.length} script${items.length === 1 ? '' : 's'}`
+  const hasFilters = Boolean(cat) || query.trim().length > 0
+  const summary = buildSummary(items.length, filtered.length, hasFilters)
 
   return (
     <div className="page home-page">
@@ -135,13 +160,14 @@ export function HomePage(): React.ReactElement {
           <select
             className="admin-select"
             value={sort}
-            onChange={(e) => setSort(e.target.value as typeof sort)}
+            onChange={(e) => setSort(e.target.value as SortMode)}
             aria-label="Sort by"
           >
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
-            <option value="az">A–Z</option>
-            <option value="za">Z–A</option>
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
           {!online && (
             <span className="nav-badge" role="status" title="Offline — showing cached catalog">

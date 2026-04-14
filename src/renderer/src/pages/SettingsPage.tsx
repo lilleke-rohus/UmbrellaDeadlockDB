@@ -6,6 +6,445 @@ import { supabase } from '../lib/supabase'
 import { runAutoUpdate } from '../lib/autoUpdate'
 import { useToast } from '../context/ToastContext'
 
+type UpdateMessage = { text: string; ok: boolean }
+
+const SMALL_BUTTON_STYLE = { height: 28, fontSize: 12 } as const
+
+function formatLastSynced(lastSync: string | null): string {
+  if (!lastSync) {
+    return 'Never — open the Store to sync'
+  }
+  return new Date(lastSync).toLocaleString()
+}
+
+function getPasswordError(newPassword: string, confirmPassword: string): string | null {
+  if (newPassword.length < 8) {
+    return 'Password must be at least 8 characters.'
+  }
+  if (newPassword !== confirmPassword) {
+    return 'Passwords do not match.'
+  }
+  return null
+}
+
+function buildUpdateMessage(result: { updated: number; errors: string[] }): UpdateMessage {
+  if (result.errors.length > 0) {
+    return { text: `Errors: ${result.errors.join('; ')}`, ok: false }
+  }
+  if (result.updated === 0) {
+    return { text: 'All scripts are up to date.', ok: true }
+  }
+  return { text: `Updated ${result.updated} script${result.updated !== 1 ? 's' : ''}.`, ok: true }
+}
+
+function signedInDescription(
+  email: string | undefined,
+  role: string,
+  profileState: {
+    profileLoaded: boolean
+    verifiedDeveloper: boolean
+    authorBlocked: boolean
+    authLoading: boolean
+  },
+): React.ReactElement {
+  if (!profileState.profileLoaded && profileState.authLoading) {
+    return (
+      <>
+        <strong>{email}</strong> · loading profile…
+      </>
+    )
+  }
+  if (!profileState.profileLoaded) {
+    return (
+      <>
+        <strong>{email}</strong> · profile not loaded (check database / RLS)
+      </>
+    )
+  }
+  return (
+    <>
+      <strong>{email}</strong> · role: <strong>{role}</strong>
+      {profileState.verifiedDeveloper ? (
+        <>
+          {' '}
+          · <span className="success">verified developer</span>
+        </>
+      ) : null}
+      {profileState.authorBlocked ? (
+        <>
+          {' '}
+          · <span className="error">author access blocked</span>
+        </>
+      ) : null}
+    </>
+  )
+}
+
+type AccountSectionProps = {
+  user: ReturnType<typeof useAuth>['user']
+  role: ReturnType<typeof useAuth>['role']
+  authLoading: boolean
+  profile: ReturnType<typeof useAuth>['profile']
+  accountName: string
+  accountBusy: boolean
+  accountError: string | null
+  accountSuccess: string | null
+  showEnableAuthor: boolean
+  onAccountNameChange: (value: string) => void
+  onSaveDisplayName: () => void
+  onEnableAuthor: () => void
+}
+
+function AccountSection(props: AccountSectionProps): React.ReactElement {
+  const {
+    user,
+    role,
+    authLoading,
+    profile,
+    accountName,
+    accountBusy,
+    accountError,
+    accountSuccess,
+    showEnableAuthor,
+    onAccountNameChange,
+    onSaveDisplayName,
+    onEnableAuthor,
+  } = props
+
+  return (
+    <section className="settings-section">
+      <div className="settings-section-title">Account</div>
+
+      {!user ? (
+        <div className="setting-row">
+          <div>
+            <div className="setting-label">Not signed in</div>
+            <div className="setting-desc">
+              <Link to="/login">Sign in</Link> to manage your profile and publishing access.
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="setting-row">
+            <div>
+              <div className="setting-label">Signed in</div>
+              <div className="setting-desc">
+                {signedInDescription(user.email, role, {
+                  profileLoaded: Boolean(profile),
+                  verifiedDeveloper: Boolean(profile?.verified_developer),
+                  authorBlocked: Boolean(profile?.author_blocked),
+                  authLoading,
+                })}
+              </div>
+            </div>
+          </div>
+
+          {!authLoading && !profile ? (
+            <div className="setting-row">
+              <div>
+                <div className="setting-label" style={{ color: 'var(--color-text-danger)' }}>
+                  Profile missing
+                </div>
+                <div className="setting-desc">
+                  Could not read your row in <code>public.profiles</code>. Author tools need that row (normally
+                  created on sign-up by the <code>handle_new_user</code> trigger after migrations are applied).
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="setting-row">
+            <div>
+              <div className="setting-label">Display name</div>
+              <div className="setting-desc">Shown on your published scripts</div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+              <input
+                id="settings-display-name"
+                className="field-input"
+                style={{ width: 160 }}
+                value={accountName}
+                onChange={(e) => onAccountNameChange(e.target.value)}
+                placeholder="Your name"
+                autoComplete="nickname"
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={SMALL_BUTTON_STYLE}
+                disabled={accountBusy || !supabase}
+                onClick={onSaveDisplayName}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+
+          {showEnableAuthor ? (
+            <div className="setting-row">
+              <div>
+                <div className="setting-label">Author tools</div>
+                <div className="setting-desc">
+                  Create drafts and submit scripts for review. New accounts start as readers.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                style={{ ...SMALL_BUTTON_STYLE, flexShrink: 0 }}
+                disabled={accountBusy || !supabase}
+                onClick={onEnableAuthor}
+              >
+                Enable
+              </button>
+            </div>
+          ) : null}
+
+          {accountError ? (
+            <p className="error feedback" role="alert">
+              {accountError}
+            </p>
+          ) : null}
+          {accountSuccess ? (
+            <p className="success feedback" role="status">
+              {accountSuccess}
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
+  )
+}
+
+type SecuritySectionProps = {
+  newPassword: string
+  confirmPassword: string
+  pwBusy: boolean
+  pwError: string | null
+  pwSuccess: string | null
+  onNewPasswordChange: (value: string) => void
+  onConfirmPasswordChange: (value: string) => void
+  onChangePassword: () => void
+}
+
+function SecuritySection(props: SecuritySectionProps): React.ReactElement {
+  const {
+    newPassword,
+    confirmPassword,
+    pwBusy,
+    pwError,
+    pwSuccess,
+    onNewPasswordChange,
+    onConfirmPasswordChange,
+    onChangePassword,
+  } = props
+
+  return (
+    <section className="settings-section">
+      <div className="settings-section-title">Security</div>
+      <div className="setting-row">
+        <div>
+          <div className="setting-label">Change password</div>
+          <div className="setting-desc">Must be at least 8 characters.</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
+        <input
+          className="field-input"
+          type="password"
+          placeholder="New password"
+          value={newPassword}
+          onChange={(e) => onNewPasswordChange(e.target.value)}
+          autoComplete="new-password"
+          style={{ maxWidth: 300 }}
+        />
+        <input
+          className="field-input"
+          type="password"
+          placeholder="Confirm new password"
+          value={confirmPassword}
+          onChange={(e) => onConfirmPasswordChange(e.target.value)}
+          autoComplete="new-password"
+          style={{ maxWidth: 300 }}
+        />
+        <div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={SMALL_BUTTON_STYLE}
+            disabled={pwBusy || !newPassword || !confirmPassword}
+            onClick={onChangePassword}
+          >
+            {pwBusy ? 'Saving…' : 'Update password'}
+          </button>
+        </div>
+      </div>
+      {pwError ? (
+        <p className="error feedback" role="alert">
+          {pwError}
+        </p>
+      ) : null}
+      {pwSuccess ? (
+        <p className="success feedback" role="status">
+          {pwSuccess}
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
+type ScriptsFolderSectionProps = {
+  root: string
+  onRootChange: (value: string) => void
+  onPickFolder: () => void
+  onSaveRoot: () => void
+}
+
+function ScriptsFolderSection(props: ScriptsFolderSectionProps): React.ReactElement {
+  const { root, onRootChange, onPickFolder, onSaveRoot } = props
+
+  return (
+    <section className="settings-section">
+      <div className="settings-section-title">Scripts folder</div>
+      <div className="setting-row">
+        <div>
+          <div className="setting-label">Scripts folder path</div>
+          <div className="setting-desc">
+            Installed scripts are written here. Default on Windows: <code>C:\Umbrella\deadlock_scripts</code>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn"
+          style={{ ...SMALL_BUTTON_STYLE, flexShrink: 0 }}
+          onClick={onPickFolder}
+        >
+          Browse…
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 0' }}>
+        <input
+          id="settings-scripts-root"
+          className="field-input grow"
+          style={{ flex: '1 1 200px', minWidth: 0 }}
+          value={root}
+          onChange={(e) => onRootChange(e.target.value)}
+          placeholder="e.g. C:\Umbrella\deadlock_scripts"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          className="btn btn-primary"
+          style={{ ...SMALL_BUTTON_STYLE, flexShrink: 0 }}
+          onClick={onSaveRoot}
+        >
+          Save
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function CatalogSection({ lastSync }: { lastSync: string | null }): React.ReactElement {
+  return (
+    <section className="settings-section">
+      <div className="settings-section-title">Catalog cache</div>
+      <div className="setting-row">
+        <div>
+          <div className="setting-label">Last synced</div>
+          <div className="setting-desc">{formatLastSynced(lastSync)}</div>
+        </div>
+      </div>
+      <div className="setting-row" style={{ borderBottom: 'none' }}>
+        <div>
+          <div className="setting-label">Offline browsing</div>
+          <div className="setting-desc">
+            The catalog is cached locally. Install and update still require an internet connection.
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+type ScriptUpdatesSectionProps = {
+  autoUpdate: boolean
+  updateChecking: boolean
+  updateMsg: UpdateMessage | null
+  onToggleAutoUpdate: (enabled: boolean) => void
+  onCheckNow: () => void
+}
+
+function ScriptUpdatesSection(props: ScriptUpdatesSectionProps): React.ReactElement {
+  const { autoUpdate, updateChecking, updateMsg, onToggleAutoUpdate, onCheckNow } = props
+
+  return (
+    <section className="settings-section">
+      <div className="settings-section-title">Script updates</div>
+      <div className="setting-row">
+        <div>
+          <div className="setting-label">Auto-update on launch</div>
+          <div className="setting-desc">
+            When the app starts, check installed scripts against the store and download any newer versions
+            automatically.
+          </div>
+        </div>
+        <label className="toggle-switch" style={{ flexShrink: 0 }}>
+          <input type="checkbox" checked={autoUpdate} onChange={(e) => onToggleAutoUpdate(e.target.checked)} />
+          <span className="toggle-track" />
+        </label>
+      </div>
+      <div className="setting-row" style={{ borderBottom: 'none' }}>
+        <div>
+          <div className="setting-label">Check now</div>
+          <div className="setting-desc">Manually scan all installed scripts for updates from the store.</div>
+        </div>
+        <button
+          type="button"
+          className="btn"
+          style={{ ...SMALL_BUTTON_STYLE, flexShrink: 0 }}
+          disabled={updateChecking || !supabase}
+          onClick={onCheckNow}
+        >
+          {updateChecking ? 'Checking…' : 'Check for updates'}
+        </button>
+      </div>
+      {updateMsg ? (
+        <p className={`feedback ${updateMsg.ok ? 'success' : 'error'}`} role={updateMsg.ok ? 'status' : 'alert'}>
+          {updateMsg.text}
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
+function LegalSection(): React.ReactElement {
+  return (
+    <section className="settings-section">
+      <div className="settings-section-title">Legal &amp; information</div>
+      <div className="setting-row" style={{ borderBottom: 'none', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <Link to="/legal/terms" className="btn" style={{ ...SMALL_BUTTON_STYLE, textDecoration: 'none' }}>
+            Terms of Service
+          </Link>
+          <Link to="/legal/privacy" className="btn" style={{ ...SMALL_BUTTON_STYLE, textDecoration: 'none' }}>
+            Privacy Policy
+          </Link>
+        </div>
+      </div>
+      <p className="muted small" style={{ marginTop: 4, lineHeight: 1.5, maxWidth: 520 }}>
+        This app is not affiliated with or connected to Umbrella (
+        <a href="https://uc.zone" target="_blank" rel="noopener noreferrer">
+          https://uc.zone
+        </a>
+        ) or Deadlock (Valve).
+      </p>
+    </section>
+  )
+}
+
 export function SettingsPage(): React.ReactElement {
   const { user, profile, role, refreshProfile, loading: authLoading } = useAuth()
   const { addToast } = useToast()
@@ -24,7 +463,7 @@ export function SettingsPage(): React.ReactElement {
 
   const [autoUpdate, setAutoUpdate] = useState(false)
   const [updateChecking, setUpdateChecking] = useState(false)
-  const [updateMsg, setUpdateMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [updateMsg, setUpdateMsg] = useState<UpdateMessage | null>(null)
 
   useEffect(() => {
     void window.umbrella.getSettings().then((s) => {
@@ -35,7 +474,10 @@ export function SettingsPage(): React.ReactElement {
   }, [])
 
   useEffect(() => {
-    if (!user) { setAccountName(''); return }
+    if (!user) {
+      setAccountName('')
+      return
+    }
     const fromProfile = profile?.display_name
     const fromMeta = typeof user.user_metadata?.display_name === 'string' ? user.user_metadata.display_name : ''
     setAccountName((fromProfile ?? fromMeta ?? '').trim())
@@ -43,7 +485,9 @@ export function SettingsPage(): React.ReactElement {
 
   async function pickFolder(): Promise<void> {
     const picked = await window.umbrella.pickScriptsDirectory()
-    if (picked) { setRoot(picked) }
+    if (picked) {
+      setRoot(picked)
+    }
   }
 
   async function saveRoot(): Promise<void> {
@@ -66,7 +510,10 @@ export function SettingsPage(): React.ReactElement {
         .from('profiles')
         .update({ display_name: trimmed || null })
         .eq('id', user.id)
-      if (error) { setAccountError(error.message); return }
+      if (error) {
+        setAccountError(error.message)
+        return
+      }
       await refreshProfile()
       setAccountSuccess('Display name saved.')
     } finally {
@@ -81,7 +528,10 @@ export function SettingsPage(): React.ReactElement {
     setAccountSuccess(null)
     try {
       const { error } = await supabase.rpc('become_author')
-      if (error) { setAccountError(error.message); return }
+      if (error) {
+        setAccountError(error.message)
+        return
+      }
       await refreshProfile()
       setAccountSuccess('Author tools enabled — open Library in the sidebar.')
     } finally {
@@ -91,14 +541,20 @@ export function SettingsPage(): React.ReactElement {
 
   async function changePassword(): Promise<void> {
     if (!supabase || !user) return
-    if (newPassword.length < 8) { setPwError('Password must be at least 8 characters.'); return }
-    if (newPassword !== confirmPassword) { setPwError('Passwords do not match.'); return }
+    const passwordError = getPasswordError(newPassword, confirmPassword)
+    if (passwordError) {
+      setPwError(passwordError)
+      return
+    }
     setPwBusy(true)
     setPwError(null)
     setPwSuccess(null)
     try {
       const { error } = await supabase.auth.updateUser({ password: newPassword })
-      if (error) { setPwError(error.message); return }
+      if (error) {
+        setPwError(error.message)
+        return
+      }
       setNewPassword('')
       setConfirmPassword('')
       setPwSuccess('Password updated.')
@@ -117,13 +573,7 @@ export function SettingsPage(): React.ReactElement {
     setUpdateMsg(null)
     try {
       const result = await runAutoUpdate()
-      if (result.errors.length > 0) {
-        setUpdateMsg({ text: `Errors: ${result.errors.join('; ')}`, ok: false })
-      } else if (result.updated === 0) {
-        setUpdateMsg({ text: 'All scripts are up to date.', ok: true })
-      } else {
-        setUpdateMsg({ text: `Updated ${result.updated} script${result.updated !== 1 ? 's' : ''}.`, ok: true })
-      }
+      setUpdateMsg(buildUpdateMessage(result))
     } catch (e) {
       setUpdateMsg({ text: e instanceof Error ? e.message : 'Update check failed', ok: false })
     } finally {
@@ -136,289 +586,47 @@ export function SettingsPage(): React.ReactElement {
 
   return (
     <div className="page settings-page">
-
-      {/* Account section */}
-      <section className="settings-section">
-        <div className="settings-section-title">Account</div>
-
-        {user ? (
-          <>
-            <div className="setting-row">
-              <div>
-                <div className="setting-label">Signed in</div>
-                <div className="setting-desc">
-                  <strong>{user.email}</strong>
-                  {profile ? (
-                    <>
-                      {' '}· role: <strong>{role}</strong>
-                      {profile.verified_developer && <> · <span className="success">verified developer</span></>}
-                      {profile.author_blocked && <> · <span className="error">author access blocked</span></>}
-                    </>
-                  ) : authLoading ? (
-                    <> · loading profile…</>
-                  ) : (
-                    <> · profile not loaded (check database / RLS)</>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {user && !authLoading && !profile && (
-              <div className="setting-row">
-                <div>
-                  <div className="setting-label" style={{ color: 'var(--color-text-danger)' }}>Profile missing</div>
-                  <div className="setting-desc">
-                    Could not read your row in <code>public.profiles</code>. Author tools need that row (normally
-                    created on sign-up by the <code>handle_new_user</code> trigger after migrations are applied).
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="setting-row">
-              <div>
-                <div className="setting-label">Display name</div>
-                <div className="setting-desc">Shown on your published scripts</div>
-              </div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                <input
-                  id="settings-display-name"
-                  className="field-input"
-                  style={{ width: 160 }}
-                  value={accountName}
-                  onChange={(e) => setAccountName(e.target.value)}
-                  placeholder="Your name"
-                  autoComplete="nickname"
-                />
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ height: 28, fontSize: 12 }}
-                  disabled={accountBusy || !supabase}
-                  onClick={() => void saveDisplayName()}
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-
-            {showEnableAuthor && (
-              <div className="setting-row">
-                <div>
-                  <div className="setting-label">Author tools</div>
-                  <div className="setting-desc">
-                    Create drafts and submit scripts for review. New accounts start as readers.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ height: 28, fontSize: 12, flexShrink: 0 }}
-                  disabled={accountBusy || !supabase}
-                  onClick={() => void enableAuthor()}
-                >
-                  Enable
-                </button>
-              </div>
-            )}
-
-            {accountError && <p className="error feedback" role="alert">{accountError}</p>}
-            {accountSuccess && <p className="success feedback" role="status">{accountSuccess}</p>}
-          </>
-        ) : null}
-
-        {!user && (
-          <div className="setting-row">
-            <div>
-              <div className="setting-label">Not signed in</div>
-              <div className="setting-desc">
-                <Link to="/login">Sign in</Link> to manage your profile and publishing access.
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {user && (
-        <section className="settings-section">
-          <div className="settings-section-title">Security</div>
-          <div className="setting-row">
-            <div>
-              <div className="setting-label">Change password</div>
-              <div className="setting-desc">Must be at least 8 characters.</div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
-            <input
-              className="field-input"
-              type="password"
-              placeholder="New password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              autoComplete="new-password"
-              style={{ maxWidth: 300 }}
-            />
-            <input
-              className="field-input"
-              type="password"
-              placeholder="Confirm new password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              autoComplete="new-password"
-              style={{ maxWidth: 300 }}
-            />
-            <div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ height: 28, fontSize: 12 }}
-                disabled={pwBusy || !newPassword || !confirmPassword}
-                onClick={() => void changePassword()}
-              >
-                {pwBusy ? 'Saving…' : 'Update password'}
-              </button>
-            </div>
-          </div>
-          {pwError && <p className="error feedback" role="alert">{pwError}</p>}
-          {pwSuccess && <p className="success feedback" role="status">{pwSuccess}</p>}
-        </section>
-      )}
-
-      {/* Scripts folder section */}
-      <section className="settings-section">
-        <div className="settings-section-title">Scripts folder</div>
-
-        <div className="setting-row">
-          <div>
-            <div className="setting-label">Scripts folder path</div>
-            <div className="setting-desc">
-              Installed scripts are written here. Default on Windows: <code>C:\Umbrella\deadlock_scripts</code>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn"
-            style={{ height: 28, fontSize: 12, flexShrink: 0 }}
-            onClick={() => void pickFolder()}
-          >
-            Browse…
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 0' }}>
-          <input
-            id="settings-scripts-root"
-            className="field-input grow"
-            style={{ flex: '1 1 200px', minWidth: 0 }}
-            value={root}
-            onChange={(e) => setRoot(e.target.value)}
-            placeholder="e.g. C:\Umbrella\deadlock_scripts"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <button
-            type="button"
-            className="btn btn-primary"
-            style={{ height: 28, fontSize: 12, flexShrink: 0 }}
-            onClick={() => void saveRoot()}
-          >
-            Save
-          </button>
-        </div>
-
-      </section>
-
-      {/* Catalog section */}
-      <section className="settings-section">
-        <div className="settings-section-title">Catalog cache</div>
-        <div className="setting-row">
-          <div>
-            <div className="setting-label">Last synced</div>
-            <div className="setting-desc">
-              {lastSync ? new Date(lastSync).toLocaleString() : 'Never — open the Store to sync'}
-            </div>
-          </div>
-        </div>
-        <div className="setting-row" style={{ borderBottom: 'none' }}>
-          <div>
-            <div className="setting-label">Offline browsing</div>
-            <div className="setting-desc">
-              The catalog is cached locally. Install and update still require an internet connection.
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Script updates section */}
-      <section className="settings-section">
-        <div className="settings-section-title">Script updates</div>
-
-        <div className="setting-row">
-          <div>
-            <div className="setting-label">Auto-update on launch</div>
-            <div className="setting-desc">
-              When the app starts, check installed scripts against the store and download any newer versions automatically.
-            </div>
-          </div>
-          <label className="toggle-switch" style={{ flexShrink: 0 }}>
-            <input
-              type="checkbox"
-              checked={autoUpdate}
-              onChange={(e) => void toggleAutoUpdate(e.target.checked)}
-            />
-            <span className="toggle-track" />
-          </label>
-        </div>
-
-        <div className="setting-row" style={{ borderBottom: 'none' }}>
-          <div>
-            <div className="setting-label">Check now</div>
-            <div className="setting-desc">
-              Manually scan all installed scripts for updates from the store.
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn"
-            style={{ height: 28, fontSize: 12, flexShrink: 0 }}
-            disabled={updateChecking || !supabase}
-            onClick={() => void checkNow()}
-          >
-            {updateChecking ? 'Checking…' : 'Check for updates'}
-          </button>
-        </div>
-
-        {updateMsg && (
-          <p
-            className={`feedback ${updateMsg.ok ? 'success' : 'error'}`}
-            role={updateMsg.ok ? 'status' : 'alert'}
-          >
-            {updateMsg.text}
-          </p>
-        )}
-      </section>
-
-      <section className="settings-section">
-        <div className="settings-section-title">Legal &amp; information</div>
-        <div className="setting-row" style={{ borderBottom: 'none', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <Link to="/legal/terms" className="btn" style={{ height: 28, fontSize: 12, textDecoration: 'none' }}>
-              Terms of Service
-            </Link>
-            <Link to="/legal/privacy" className="btn" style={{ height: 28, fontSize: 12, textDecoration: 'none' }}>
-              Privacy Policy
-            </Link>
-          </div>
-        </div>
-        <p className="muted small" style={{ marginTop: 4, lineHeight: 1.5, maxWidth: 520 }}>
-          This app is not affiliated with or connected to Umbrella (
-          <a href="https://uc.zone" target="_blank" rel="noopener noreferrer">
-            https://uc.zone
-          </a>
-          ) or Deadlock (Valve).
-        </p>
-      </section>
-
+      <AccountSection
+        user={user}
+        role={role}
+        authLoading={authLoading}
+        profile={profile}
+        accountName={accountName}
+        accountBusy={accountBusy}
+        accountError={accountError}
+        accountSuccess={accountSuccess}
+        showEnableAuthor={showEnableAuthor}
+        onAccountNameChange={setAccountName}
+        onSaveDisplayName={() => void saveDisplayName()}
+        onEnableAuthor={() => void enableAuthor()}
+      />
+      {user ? (
+        <SecuritySection
+          newPassword={newPassword}
+          confirmPassword={confirmPassword}
+          pwBusy={pwBusy}
+          pwError={pwError}
+          pwSuccess={pwSuccess}
+          onNewPasswordChange={setNewPassword}
+          onConfirmPasswordChange={setConfirmPassword}
+          onChangePassword={() => void changePassword()}
+        />
+      ) : null}
+      <ScriptsFolderSection
+        root={root}
+        onRootChange={setRoot}
+        onPickFolder={() => void pickFolder()}
+        onSaveRoot={() => void saveRoot()}
+      />
+      <CatalogSection lastSync={lastSync} />
+      <ScriptUpdatesSection
+        autoUpdate={autoUpdate}
+        updateChecking={updateChecking}
+        updateMsg={updateMsg}
+        onToggleAutoUpdate={(enabled) => void toggleAutoUpdate(enabled)}
+        onCheckNow={() => void checkNow()}
+      />
+      <LegalSection />
     </div>
   )
 }
