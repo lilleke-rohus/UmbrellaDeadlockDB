@@ -1,39 +1,11 @@
 import { supabase } from './supabase'
-import type { InstallManifest, ManifestEntry } from '../../../shared/ipc'
+import type { InstallManifest } from '../../../shared/ipc'
+import { getManifestEntry, shouldUpdate } from './scriptNeedsUpdate'
 
 export type AutoUpdateResult = {
   updated: number
   skipped: number
   errors: string[]
-}
-
-const VERSION_EPSILON = 0.000001
-
-function getManifestEntry(manifest: InstallManifest, scriptId: string): ManifestEntry | undefined {
-  return manifest.entries[scriptId] ?? Object.values(manifest.entries).find((entry) => entry.scriptId === scriptId)
-}
-
-function shouldUpdate(
-  local: ManifestEntry,
-  remote: { content_version: number; updated_at: string }
-): boolean {
-  const localVersion = Number(local.contentVersion)
-  const remoteVersion = Number(remote.content_version)
-  if (Number.isFinite(localVersion) && Number.isFinite(remoteVersion)) {
-    if (remoteVersion - localVersion > VERSION_EPSILON) {
-      return true
-    }
-  } else if (remote.content_version !== local.contentVersion) {
-    return true
-  }
-
-  const localUpdatedAt = Date.parse(local.updatedAt)
-  const remoteUpdatedAt = Date.parse(remote.updated_at)
-  if (Number.isFinite(localUpdatedAt) && Number.isFinite(remoteUpdatedAt)) {
-    return remoteUpdatedAt > localUpdatedAt
-  }
-
-  return remote.updated_at > local.updatedAt
 }
 
 /**
@@ -73,7 +45,7 @@ export async function runAutoUpdate(): Promise<AutoUpdateResult> {
   const errors: string[] = []
 
   for (const row of scripts) {
-    const entry = getManifestEntry(manifest, row.id)
+    const entry = getManifestEntry(manifest, row.id, row.filename)
     if (!entry) continue
 
     const needsUpdate = shouldUpdate(entry, row)

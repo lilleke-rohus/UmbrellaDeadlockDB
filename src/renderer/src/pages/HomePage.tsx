@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { useCatalog } from '../hooks/useCatalog'
+import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconRowScript, IconScriptTile } from '../components/NavIcons'
 
@@ -94,6 +95,8 @@ export function HomePage(): React.ReactElement {
     }
   }, [filtered, sort])
 
+  const catalogUpdateIds = useScriptUpdateHighlightSet(sorted)
+
   const hasFilters = Boolean(cat) || q.trim().length > 0
   const summary =
     items.length === 0
@@ -173,7 +176,11 @@ export function HomePage(): React.ReactElement {
       ) : storeView === 'grid' ? (
         <div className="card-grid fade-in" aria-label="Scripts">
           {sorted.map((s) => (
-            <Link key={s.id} to={`/script/${s.slug}`} className="script-card">
+            <Link
+              key={s.id}
+              to={`/script/${s.slug}`}
+              className={`script-card${catalogUpdateIds.has(s.id) ? ' script-card-has-update' : ''}`}
+            >
               <div className="card-header">
                 <div className="card-icon">
                   <IconScriptTile />
@@ -205,7 +212,11 @@ export function HomePage(): React.ReactElement {
       ) : (
         <div className="row-list fade-in" aria-label="Scripts">
           {sorted.map((s) => (
-            <Link key={s.id} to={`/script/${s.slug}`} className="script-row">
+            <Link
+              key={s.id}
+              to={`/script/${s.slug}`}
+              className={`script-row${catalogUpdateIds.has(s.id) ? ' script-row-has-update' : ''}`}
+            >
               <div className="row-icon">
                 <IconRowScript />
               </div>

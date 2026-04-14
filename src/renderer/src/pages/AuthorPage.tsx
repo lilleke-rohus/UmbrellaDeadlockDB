@@ -8,6 +8,8 @@ import type { ScriptRow, ScriptStatus } from '../../../shared/supabase.types'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconScriptTile } from '../components/NavIcons'
 import { loadCachedCatalog } from '../lib/catalogDb'
+import { shouldUpdate } from '../lib/scriptNeedsUpdate'
+import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
 import { useToast } from '../context/ToastContext'
 import { userFacingMessage } from '../lib/userFacingError'
 
@@ -188,6 +190,7 @@ type InstalledEntry = {
   slug: string | null
   contentVersion: number
   installedAt: string
+  needsCatalogUpdate: boolean
 }
 
 async function loadInstalledScripts(): Promise<InstalledEntry[]> {
@@ -198,6 +201,7 @@ async function loadInstalledScripts(): Promise<InstalledEntry[]> {
   const catalogById = new Map(catalog.map((s) => [s.id, s]))
   return Object.values(manifest.entries).map((entry) => {
     const meta = catalogById.get(entry.scriptId)
+    const needsCatalogUpdate = meta ? shouldUpdate(entry, meta) : false
     return {
       scriptId: entry.scriptId,
       filename: entry.filename,
@@ -206,6 +210,7 @@ async function loadInstalledScripts(): Promise<InstalledEntry[]> {
       slug: meta?.slug ?? null,
       contentVersion: entry.contentVersion,
       installedAt: entry.installedAt,
+      needsCatalogUpdate,
     }
   })
 }
@@ -335,12 +340,13 @@ function InstalledLibraryView(): React.ReactElement {
                 </div>
               </>
             )
+            const cardClass = `script-card${e.needsCatalogUpdate ? ' script-card-has-update' : ''}`
             return e.slug ? (
-              <Link key={e.scriptId} to={`/script/${e.slug}`} className="script-card">
+              <Link key={e.scriptId} to={`/script/${e.slug}`} className={cardClass}>
                 {inner}
               </Link>
             ) : (
-              <div key={e.scriptId} className="script-card">
+              <div key={e.scriptId} className={cardClass}>
                 {inner}
               </div>
             )
@@ -367,12 +373,13 @@ function InstalledLibraryView(): React.ReactElement {
                 </div>
               </>
             )
+            const rowClass = `script-row${e.needsCatalogUpdate ? ' script-row-has-update' : ''}`
             return e.slug ? (
-              <Link key={e.scriptId} to={`/script/${e.slug}`} className="script-row">
+              <Link key={e.scriptId} to={`/script/${e.slug}`} className={rowClass}>
                 {inner}
               </Link>
             ) : (
-              <div key={e.scriptId} className="script-row">
+              <div key={e.scriptId} className={rowClass}>
                 {inner}
               </div>
             )
@@ -488,6 +495,18 @@ function AuthorStudio(): React.ReactElement {
       return true
     })
   }, [mine, tabFilter, categoryFilter, librarySearch])
+
+  const libraryHighlightRefs = useMemo(
+    () =>
+      filtered.map((r) => ({
+        id: r.id,
+        filename: r.filename,
+        content_version: r.content_version,
+        updated_at: r.updated_at,
+      })),
+    [filtered],
+  )
+  const catalogUpdateIds = useScriptUpdateHighlightSet(libraryHighlightRefs)
 
   function openEdit(r: ScriptRow): void {
     setForm({
@@ -684,7 +703,7 @@ function AuthorStudio(): React.ReactElement {
               <button
                 key={r.id}
                 type="button"
-                className="script-card"
+                className={`script-card${catalogUpdateIds.has(r.id) ? ' script-card-has-update' : ''}`}
                 style={{ textAlign: 'left', width: '100%' }}
                 onClick={() => openEdit(r)}
               >
@@ -727,7 +746,7 @@ function AuthorStudio(): React.ReactElement {
               <button
                 key={r.id}
                 type="button"
-                className="script-row"
+                className={`script-row${catalogUpdateIds.has(r.id) ? ' script-row-has-update' : ''}`}
                 style={{ width: '100%', textAlign: 'left' }}
                 onClick={() => openEdit(r)}
               >

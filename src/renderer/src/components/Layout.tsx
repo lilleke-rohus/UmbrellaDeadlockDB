@@ -348,17 +348,18 @@ function SidebarAccountPanel({
   return (
     <div className="sidebar-bottom">
       {user ? (
-        <div className="user-row user-row-stack">
-          <div className="user-row-top">
-            <div className="avatar" aria-hidden>
-              {initials}
-            </div>
-            <div className="user-text">
-              <div className="user-name">{profile?.display_name?.trim() || user.email?.split('@')[0] || 'User'}</div>
-              <div className="user-role">{roleLabel}</div>
-            </div>
+        <div className="user-row user-row-account">
+          <div className="avatar" aria-hidden>
+            {initials}
           </div>
-          <button type="button" className="btn btn-ghost btn-block" onClick={onSignOut}>
+          <div
+            className="user-account-meta"
+            title={`${profile?.display_name?.trim() || user.email?.split('@')[0] || 'User'} · ${roleLabel}`}
+          >
+            <div className="user-name">{profile?.display_name?.trim() || user.email?.split('@')[0] || 'User'}</div>
+            <div className="user-role">{roleLabel}</div>
+          </div>
+          <button type="button" className="btn btn-tiny user-account-signout" onClick={onSignOut}>
             Sign out
           </button>
         </div>
