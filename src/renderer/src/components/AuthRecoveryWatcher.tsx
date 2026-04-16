@@ -1,7 +1,12 @@
 import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useToast } from '../context/ToastContext'
 import { consumeAuthDeepLinkUrl } from '../lib/consumeAuthDeepLink'
+import {
+  clearPasswordRecoveryRequired,
+  isPasswordRecoveryRequired,
+  markPasswordRecoveryRequired,
+} from '../lib/passwordRecoveryRequirement'
 import { supabase } from '../lib/supabase'
 
 function hashLooksLikeSupabaseRecovery(): boolean {
@@ -11,11 +16,16 @@ function hashLooksLikeSupabaseRecovery(): boolean {
 
 async function applyDeepLinkUrl(
   url: string,
-  onError: (message: string) => void
+  onError: (message: string) => void,
+  onRecoveryLinkConsumed: () => void
 ): Promise<void> {
-  const { error } = await consumeAuthDeepLinkUrl(url)
+  const { error, linkType } = await consumeAuthDeepLinkUrl(url)
   if (error) {
     onError(error)
+    return
+  }
+  if (linkType === 'recovery') {
+    onRecoveryLinkConsumed()
   }
 }
 
@@ -24,9 +34,15 @@ async function applyDeepLinkUrl(
  */
 export function AuthRecoveryWatcher(): null {
   const navigate = useNavigate()
+  const location = useLocation()
   const { addToast } = useToast()
 
   useEffect(() => {
+    function goReset(): void {
+      markPasswordRecoveryRequired()
+      void navigate('/reset-password', { replace: true })
+    }
+
     function onDeepLinkError(message: string): void {
       addToast(message, 'error')
     }
@@ -35,15 +51,11 @@ export function AuthRecoveryWatcher(): null {
       if (!url || !supabase) {
         return
       }
-      void applyDeepLinkUrl(url, onDeepLinkError)
+      void applyDeepLinkUrl(url, onDeepLinkError, goReset)
     })
 
     if (!supabase) {
       return (): void => {}
-    }
-
-    function goReset(): void {
-      void navigate('/reset-password', { replace: true })
     }
 
     if (hashLooksLikeSupabaseRecovery()) {
@@ -55,7 +67,7 @@ export function AuthRecoveryWatcher(): null {
     }
 
     const offDeepLink = window.umbrella.onAuthDeepLink((url) => {
-      void applyDeepLinkUrl(url, onDeepLinkError)
+      void applyDeepLinkUrl(url, onDeepLinkError, goReset)
     })
 
     const {
@@ -71,6 +83,22 @@ export function AuthRecoveryWatcher(): null {
       subscription.unsubscribe()
     }
   }, [addToast, navigate])
+
+  useEffect(() => {
+    if (!supabase) {
+      return
+    }
+    if (!isPasswordRecoveryRequired()) {
+      return
+    }
+    if (location.pathname === '/reset-password') {
+      return
+    }
+    clearPasswordRecoveryRequired()
+    void supabase.auth.signOut().then(() => {
+      void navigate('/', { replace: true })
+    })
+  }, [location.pathname, navigate])
 
   return null
 }

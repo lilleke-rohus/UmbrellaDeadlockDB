@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { APP_DISPLAY_NAME } from '../lib/appDisplayName'
+import { clearPasswordRecoveryRequired } from '../lib/passwordRecoveryRequirement'
 import { supabase, supabaseConfigured } from '../lib/supabase'
 
 const MIN_PASSWORD_LEN = 8
@@ -19,6 +20,12 @@ export function ResetPasswordPage(): ReactElement {
   useEffect(() => {
     document.title = `Reset password · ${APP_DISPLAY_NAME}`
   }, [])
+
+  useEffect(() => {
+    if (!loading && !user) {
+      clearPasswordRecoveryRequired()
+    }
+  }, [loading, user])
 
   if (!supabaseConfigured) {
     return <Navigate to="/login" replace />
@@ -73,6 +80,7 @@ export function ResetPasswordPage(): ReactElement {
         setError(upErr.message)
         return
       }
+      clearPasswordRecoveryRequired()
       addToast('Password updated. You can continue signed in.', 'success')
       void navigate('/', { replace: true })
     } finally {
