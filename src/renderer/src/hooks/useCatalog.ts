@@ -32,7 +32,7 @@ export function useCatalog(): {
       const { data, error: qErr } = await supabase
         .from('scripts')
         .select(
-          'id, slug, title, description, category, tags, filename, status, content_version, updated_at, published_at, author_id, install_count, author_display_name_override, author:profiles!author_id(display_name)'
+          'id, slug, title, description, category, tags, filename, status, content_version, content_hash, updated_at, published_at, author_id, install_count, author_display_name_override, author:profiles!author_id(display_name)'
         )
         .eq('status', 'published')
         .order('updated_at', { ascending: false })
@@ -54,6 +54,7 @@ export function useCatalog(): {
           filename: row.filename as string,
           status: row.status as string,
           content_version: row.content_version as number,
+          content_hash: (row.content_hash as string | null) ?? null,
           updated_at: row.updated_at as string,
           published_at: (row.published_at as string | null) ?? null,
           author_id: row.author_id as string,

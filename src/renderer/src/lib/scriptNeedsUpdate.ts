@@ -22,7 +22,13 @@ export function getManifestEntry(
   return undefined
 }
 
-export function shouldUpdate(local: ManifestEntry, remote: Pick<CachedScriptMeta, 'content_version' | 'updated_at'>): boolean {
+export function shouldUpdate(
+  local: ManifestEntry,
+  remote: Pick<CachedScriptMeta, 'content_version' | 'updated_at' | 'content_hash'>,
+): boolean {
+  if (local.contentHash && remote.content_hash) {
+    return local.contentHash !== remote.content_hash
+  }
   const versionComparison = compareVersion(local.contentVersion, remote.content_version)
   if (versionComparison > 0) {
     return true
@@ -56,7 +62,7 @@ function compareTimestamp(localUpdatedAtValue: string, remoteUpdatedAtValue: str
 }
 
 export function getScriptInstallState(
-  script: Pick<CachedScriptMeta, 'id' | 'filename' | 'content_version' | 'updated_at'>,
+  script: Pick<CachedScriptMeta, 'id' | 'filename' | 'content_version' | 'updated_at' | 'content_hash'>,
   manifest: InstallManifest,
 ): ScriptInstallState {
   const entry = getManifestEntry(manifest, script.id, script.filename)
@@ -66,7 +72,7 @@ export function getScriptInstallState(
 
 /** True when the catalog row is newer than the installed manifest entry (same rules as the Install button). */
 export function scriptNeedsUpdateFromManifest(
-  script: Pick<CachedScriptMeta, 'id' | 'filename' | 'content_version' | 'updated_at'>,
+  script: Pick<CachedScriptMeta, 'id' | 'filename' | 'content_version' | 'updated_at' | 'content_hash'>,
   manifest: InstallManifest,
 ): boolean {
   return getScriptInstallState(script, manifest) === 'update-available'

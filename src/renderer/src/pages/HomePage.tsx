@@ -4,6 +4,8 @@ import { useCatalog } from '../hooks/useCatalog'
 import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconRowScript, IconScriptTile } from '../components/NavIcons'
+import { useToast } from '../context/ToastContext'
+import { scanLocalLuaScriptsWithHashes, summarizeHashCheckAgainstCatalog } from '../lib/scriptHash'
 
 type SortMode = 'newest' | 'oldest' | 'az' | 'za'
 type CatalogItem = ReturnType<typeof useCatalog>['items'][number]
@@ -114,8 +116,11 @@ function formatUpdated(iso: string): string {
 export function HomePage(): React.ReactElement {
   const { storeSearch, storeView } = useOutletContext<VaultOutletContext>()
   const { items, loading, error, online, refresh } = useCatalog()
+  const { addToast } = useToast()
   const [cat, setCat] = useState<string | null>(null)
   const [sort, setSort] = useState<SortMode>('newest')
+  const [checkingHashes, setCheckingHashes] = useState(false)
+  const [hashProgress, setHashProgress] = useState<{ done: number; total: number } | null>(null)
 
   const query = storeSearch
 
@@ -129,6 +134,29 @@ export function HomePage(): React.ReactElement {
 
   const hasFilters = Boolean(cat) || query.trim().length > 0
   const summary = buildSummary(items.length, filtered.length, hasFilters)
+
+  async function checkForScriptUpdates(): Promise<void> {
+    if (checkingHashes) return
+    setCheckingHashes(true)
+    setHashProgress({ done: 0, total: 0 })
+    addToast('Checking local script hashes…')
+    try {
+      const localScan = await scanLocalLuaScriptsWithHashes((progress) => {
+        setHashProgress(progress)
+      })
+      if (localScan.error) {
+        addToast(localScan.error, 'error')
+        return
+      }
+      const result = summarizeHashCheckAgainstCatalog(localScan.scripts, items)
+      addToast(
+        `Hash check: ${result.current} current, ${result.outdated} need update, ${result.missingHash} missing hash, ${result.unknown} not in store.`,
+        result.outdated > 0 ? 'info' : 'success',
+      )
+    } finally {
+      setCheckingHashes(false)
+    }
+  }
 
   return (
     <div className="page home-page">
@@ -176,6 +204,17 @@ export function HomePage(): React.ReactElement {
           )}
           <button type="button" className="btn btn-compact" onClick={() => void refresh()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh catalog'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-compact"
+            onClick={() => void checkForScriptUpdates()}
+            disabled={checkingHashes || loading}
+            title="Compare local script hashes against store versions"
+          >
+            {checkingHashes
+              ? `Checking ${hashProgress?.done ?? 0}/${hashProgress?.total ?? 0}…`
+              : 'Check for updates'}
           </button>
         </div>
       </div>

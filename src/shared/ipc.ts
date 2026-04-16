@@ -44,6 +44,7 @@ export type ManifestEntry = {
   contentVersion: number
   updatedAt: string
   installedAt: string
+  contentHash?: string | null
 }
 
 export type InstallManifest = {

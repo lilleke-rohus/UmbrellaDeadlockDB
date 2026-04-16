@@ -31,19 +31,19 @@ function SkeletonDetail(): React.ReactElement {
         </div>
       </div>
 
-      <div className="detail-desc-section">
-        <div className="sk" style={{ height: 11, width: 80, marginBottom: 10 }} />
-        <div className="sk" style={{ height: 13, width: '100%', marginBottom: 5 }} />
-        <div className="sk" style={{ height: 13, width: '100%', marginBottom: 5 }} />
-        <div className="sk" style={{ height: 13, width: '60%' }} />
-      </div>
-
       <div className="detail-action-bar">
         <div className="detail-action-primary">
           <div className="sk" style={{ height: 30, width: 88, borderRadius: 8 }} />
           <div className="sk" style={{ height: 30, width: 120, borderRadius: 8 }} />
           <div className="sk" style={{ height: 30, width: 96, borderRadius: 8 }} />
         </div>
+      </div>
+
+      <div className="detail-desc-section">
+        <div className="sk" style={{ height: 11, width: 80, marginBottom: 10 }} />
+        <div className="sk" style={{ height: 13, width: '100%', marginBottom: 5 }} />
+        <div className="sk" style={{ height: 13, width: '100%', marginBottom: 5 }} />
+        <div className="sk" style={{ height: 13, width: '60%' }} />
       </div>
     </div>
   )
@@ -74,6 +74,7 @@ export function ScriptDetailPage(): React.ReactElement {
             filename: row.filename,
             status: row.status,
             content_version: row.content_version,
+            content_hash: row.content_hash,
             updated_at: row.updated_at,
             published_at: row.published_at,
             author_id: row.author_id,
@@ -105,7 +106,7 @@ export function ScriptDetailPage(): React.ReactElement {
       const { data, error } = await supabase
         .from('scripts')
         .select(
-          'id, slug, title, description, category, tags, filename, status, content_version, updated_at, published_at, author_id, changelog, install_count'
+          'id, slug, title, description, category, tags, filename, status, content_version, content_hash, updated_at, published_at, author_id, changelog, install_count'
         )
         .eq('slug', slug)
         .maybeSingle()
@@ -173,6 +174,7 @@ export function ScriptDetailPage(): React.ReactElement {
         scriptId: row.id,
         filename: row.filename,
         contentVersion: row.content_version,
+        contentHash: row.content_hash,
         updatedAt: row.updated_at,
         installedAt: new Date().toISOString()
       })
@@ -247,23 +249,6 @@ export function ScriptDetailPage(): React.ReactElement {
         </div>
       </div>
 
-      {/* Description */}
-      <section className="detail-desc-section" aria-labelledby="description-heading">
-        <h2 className="detail-section-label" id="description-heading">
-          Description
-        </h2>
-        <p className="detail-desc">{row.description?.trim() || 'No description.'}</p>
-      </section>
-
-      {/* Tags */}
-      {row.tags && row.tags.length > 0 && (
-        <div className="detail-tags">
-          {row.tags.map((t) => (
-            <span key={t} className="tag">{t}</span>
-          ))}
-        </div>
-      )}
-
       {/* Action bar */}
       <div className="detail-action-bar" aria-label="Install actions">
         <div className="detail-action-primary">
@@ -303,6 +288,23 @@ export function ScriptDetailPage(): React.ReactElement {
           </button>
         )}
       </div>
+
+      {/* Description */}
+      <section className="detail-desc-section" aria-labelledby="description-heading">
+        <h2 className="detail-section-label" id="description-heading">
+          Description
+        </h2>
+        <p className="detail-desc">{row.description?.trim() || 'No description.'}</p>
+      </section>
+
+      {/* Tags */}
+      {row.tags && row.tags.length > 0 && (
+        <div className="detail-tags">
+          {row.tags.map((t) => (
+            <span key={t} className="tag">{t}</span>
+          ))}
+        </div>
+      )}
 
       {/* Changelog */}
       {changelogHistory.length > 0 ? (

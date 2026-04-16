@@ -28,7 +28,7 @@ export async function runAutoUpdate(): Promise<AutoUpdateResult> {
 
   const { data: scripts, error } = await supabase
     .from('scripts')
-    .select('id, filename, content_version, updated_at, lua_source')
+    .select('id, filename, content_version, content_hash, updated_at, lua_source')
     .in('id', ids)
     .eq('status', 'published')
 
@@ -70,6 +70,7 @@ export async function runAutoUpdate(): Promise<AutoUpdateResult> {
       scriptId: row.id,
       filename: row.filename,
       contentVersion: row.content_version,
+      contentHash: row.content_hash,
       updatedAt: row.updated_at,
       installedAt: entry.installedAt,
     })

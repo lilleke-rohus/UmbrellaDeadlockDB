@@ -4,22 +4,22 @@ import { getScriptInstallState } from '../lib/scriptNeedsUpdate'
 import { supabase } from '../lib/supabase'
 import type { InstallManifest } from '../../../shared/ipc'
 
-export type ScriptUpdateRef = Pick<CachedScriptMeta, 'id' | 'filename' | 'content_version' | 'updated_at'>
+export type ScriptUpdateRef = Pick<CachedScriptMeta, 'id' | 'filename' | 'content_version' | 'updated_at' | 'content_hash'>
 
 async function mergeRemoteScriptMeta(scripts: ScriptUpdateRef[]): Promise<ScriptUpdateRef[]> {
   if (!supabase || scripts.length === 0) return scripts
   const ids = [...new Set(scripts.map((s) => s.id))]
   const { data, error } = await supabase
     .from('scripts')
-    .select('id, content_version, updated_at')
+    .select('id, content_version, content_hash, updated_at')
     .in('id', ids)
   if (error || !data?.length) return scripts
   const map = new Map(
-    (data as { id: string; content_version: number; updated_at: string }[]).map((r) => [r.id, r]),
+    (data as { id: string; content_version: number; content_hash: string | null; updated_at: string }[]).map((r) => [r.id, r]),
   )
   return scripts.map((s) => {
     const r = map.get(s.id)
-    return r ? { ...s, content_version: r.content_version, updated_at: r.updated_at } : s
+    return r ? { ...s, content_version: r.content_version, content_hash: r.content_hash, updated_at: r.updated_at } : s
   })
 }
 
@@ -44,7 +44,7 @@ export function useScriptUpdateHighlightSet(scripts: ScriptUpdateRef[]): Set<str
   scriptsRef.current = scripts
 
   const fingerprint = useMemo(
-    () => scripts.map((s) => `${s.id}\0${s.content_version}\0${s.updated_at}`).join('\n'),
+    () => scripts.map((s) => `${s.id}\0${s.content_version}\0${s.content_hash ?? ''}\0${s.updated_at}`).join('\n'),
     [scripts],
   )
 

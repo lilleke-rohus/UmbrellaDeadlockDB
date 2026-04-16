@@ -12,6 +12,13 @@ import { shouldUpdate } from '../lib/scriptNeedsUpdate'
 import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
 import { useToast } from '../context/ToastContext'
 import { userFacingMessage } from '../lib/userFacingError'
+import {
+  computeLuaContentHash,
+  normalizeFilename,
+  scanLocalLuaScriptsWithHashes,
+  summarizeHashCheckAgainstCatalog,
+  type LocalLuaScript,
+} from '../lib/scriptHash'
 
 type DraftForm = {
   id: string | null
@@ -41,14 +48,14 @@ const emptyForm: DraftForm = {
   status: 'draft',
 }
 
-type TabFilter = 'all' | 'draft' | 'pending_review' | 'published'
+type TabFilter = 'all' | 'draft' | 'published' | 'rejected'
 type PageMode = 'list' | 'edit'
 
 const TAB_FILTERS: ReadonlyArray<{ value: TabFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'draft', label: 'Drafts' },
-  { value: 'pending_review', label: 'Pending' },
   { value: 'published', label: 'Published' },
+  { value: 'rejected', label: 'Hidden' },
 ]
 
 const STATUS_PILL_CLASS: Readonly<Record<ScriptStatus, string>> = {
@@ -62,7 +69,7 @@ const STATUS_LABEL: Readonly<Record<ScriptStatus, string>> = {
   draft: 'Draft',
   pending_review: 'Pending',
   published: 'Published',
-  rejected: 'Rejected',
+  rejected: 'Hidden',
 }
 
 function statusPillClass(status: ScriptStatus): string {
@@ -215,6 +222,7 @@ function LuaScriptDropCard({
 
 type InstalledEntry = {
   scriptId: string
+  entryKey: string
   filename: string
   title: string
   description: string | null
@@ -222,19 +230,68 @@ type InstalledEntry = {
   contentVersion: number
   installedAt: string
   needsCatalogUpdate: boolean
+  external: boolean
+  removedFromStore: boolean
 }
 
-async function loadInstalledScripts(): Promise<InstalledEntry[]> {
+function createReadableTitleFromFilename(filename: string): string {
+  const stem = filename.replace(/\.lua$/i, '')
+  return humanTitleFromStem(stem)
+}
+
+function createLocalManifestLikeEntry(
+  scriptId: string,
+  filename: string,
+  header: { version: number; iso: string },
+): { scriptId: string; filename: string; contentVersion: number; updatedAt: string; installedAt: string } {
+  return {
+    scriptId,
+    filename,
+    contentVersion: header.version,
+    updatedAt: header.iso,
+    installedAt: header.iso,
+  }
+}
+
+async function loadLocalLuaFiles(
+  onProgress?: (progress: { done: number; total: number }) => void,
+): Promise<{ files: LocalLuaScript[]; error: string | null }> {
+  const result = await scanLocalLuaScriptsWithHashes(onProgress)
+  return { files: result.scripts, error: result.error }
+}
+
+async function loadInstalledScripts(localFiles: LocalLuaScript[]): Promise<InstalledEntry[]> {
   const [manifest, catalog] = await Promise.all([
     window.umbrella.getManifest(),
     loadCachedCatalog(),
   ])
+  const localFileByNormalizedFilename = new Map(localFiles.map((file) => [file.normalizedFilename, file]))
   const catalogById = new Map(catalog.map((s) => [s.id, s]))
-  return Object.values(manifest.entries).map((entry) => {
+  const catalogByNormalizedFilename = new Map<string, typeof catalog>()
+  for (const item of catalog) {
+    const normalized = normalizeFilename(item.filename)
+    const list = catalogByNormalizedFilename.get(normalized)
+    if (list) {
+      list.push(item)
+      continue
+    }
+    catalogByNormalizedFilename.set(normalized, [item])
+  }
+
+  const installedEntriesFromManifest: InstalledEntry[] = []
+  const consumedLocalFilenames = new Set<string>()
+  for (const entry of Object.values(manifest.entries)) {
+    const localFile = localFileByNormalizedFilename.get(normalizeFilename(entry.filename))
+    if (!localFile) {
+      continue
+    }
     const meta = catalogById.get(entry.scriptId)
-    const needsCatalogUpdate = meta ? shouldUpdate(entry, meta) : false
-    return {
+    const hashMatchesCatalog = Boolean(meta?.content_hash && localFile.hash === meta.content_hash)
+    const hashMismatchesCatalog = Boolean(meta?.content_hash && localFile.hash !== meta.content_hash)
+    const needsCatalogUpdate = !hashMatchesCatalog && (hashMismatchesCatalog || (meta ? shouldUpdate(entry, meta) : false))
+    installedEntriesFromManifest.push({
       scriptId: entry.scriptId,
+      entryKey: entry.scriptId,
       filename: entry.filename,
       title: meta?.title ?? entry.filename.replace(/\.lua$/i, ''),
       description: meta?.description ?? null,
@@ -242,8 +299,58 @@ async function loadInstalledScripts(): Promise<InstalledEntry[]> {
       contentVersion: entry.contentVersion,
       installedAt: entry.installedAt,
       needsCatalogUpdate,
+      external: hashMismatchesCatalog && !hashMatchesCatalog,
+      removedFromStore: !meta,
+    })
+    consumedLocalFilenames.add(localFile.normalizedFilename)
+  }
+
+  const inferredFromLocalFiles: InstalledEntry[] = []
+  for (const localFile of localFiles) {
+    if (consumedLocalFilenames.has(localFile.normalizedFilename)) {
+      continue
     }
-  })
+    const catalogCandidates = catalogByNormalizedFilename.get(localFile.normalizedFilename) ?? []
+    const catalogMatch = catalogCandidates[0]
+    if (!catalogMatch) {
+      inferredFromLocalFiles.push({
+        scriptId: `external:unknown:${localFile.filename}`,
+        entryKey: `external:unknown:${localFile.filename}`,
+        filename: localFile.filename,
+        title: createReadableTitleFromFilename(localFile.filename),
+        description: null,
+        slug: null,
+        contentVersion: localFile.header?.version ?? 0,
+        installedAt: localFile.header?.iso ?? new Date().toISOString(),
+        needsCatalogUpdate: false,
+        external: true,
+        removedFromStore: false,
+      })
+      continue
+    }
+
+    const inferredManifestEntry = localFile.header
+      ? createLocalManifestLikeEntry(catalogMatch.id, localFile.filename, localFile.header)
+      : null
+    const hashMatched = Boolean(catalogMatch.content_hash && localFile.hash === catalogMatch.content_hash)
+    const hashMismatched = Boolean(catalogMatch.content_hash && localFile.hash !== catalogMatch.content_hash)
+    const upToDate = hashMatched || (inferredManifestEntry ? !shouldUpdate(inferredManifestEntry, catalogMatch) : false)
+    inferredFromLocalFiles.push({
+      scriptId: upToDate ? catalogMatch.id : `external:${catalogMatch.id}:${localFile.filename}`,
+      entryKey: upToDate ? catalogMatch.id : `external:${catalogMatch.id}:${localFile.filename}`,
+      filename: localFile.filename,
+      title: catalogMatch.title,
+      description: catalogMatch.description,
+      slug: catalogMatch.slug,
+      contentVersion: localFile.header?.version ?? catalogMatch.content_version,
+      installedAt: localFile.header?.iso ?? catalogMatch.updated_at,
+      needsCatalogUpdate: hashMismatched || !upToDate,
+      external: hashMismatched || !upToDate,
+      removedFromStore: false,
+    })
+  }
+
+  return [...installedEntriesFromManifest, ...inferredFromLocalFiles]
 }
 
 function SkeletonCard(): React.ReactElement {
@@ -301,16 +408,62 @@ function SkeletonLibrary({ count = 4, view = 'grid' }: { count?: number; view?: 
   )
 }
 
-function InstalledLibraryView(): React.ReactElement {
+function InstalledLibraryView({
+  showSignedInCopy = false,
+  onOpenAuthorStudio,
+}: {
+  showSignedInCopy?: boolean
+  onOpenAuthorStudio?: () => void
+} = {}): React.ReactElement {
   const { librarySearch, libraryView } = useOutletContext<VaultOutletContext>()
+  const { addToast } = useToast()
   const [entries, setEntries] = useState<InstalledEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [checkingHashes, setCheckingHashes] = useState(false)
+  const [hashProgress, setHashProgress] = useState<{ done: number; total: number } | null>(null)
+
+  const reloadEntries = useCallback(async () => {
+    setLoading(true)
+    try {
+      const localScan = await loadLocalLuaFiles()
+      setScanError(localScan.error)
+      if (localScan.error) {
+        setEntries([])
+        return
+      }
+      setEntries(await loadInstalledScripts(localScan.files))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const checkHashUpdates = useCallback(async () => {
+    if (checkingHashes) return
+    setCheckingHashes(true)
+    setHashProgress({ done: 0, total: 0 })
+    addToast('Checking local script hashes…')
+    try {
+      const localScan = await loadLocalLuaFiles((progress) => setHashProgress(progress))
+      if (localScan.error) {
+        addToast(localScan.error, 'error')
+        return
+      }
+      const catalogRows = await loadCachedCatalog()
+      const summary = summarizeHashCheckAgainstCatalog(localScan.files, catalogRows)
+      addToast(
+        `Hash check: ${summary.current} current, ${summary.outdated} need update, ${summary.missingHash} missing hash, ${summary.unknown} not in store.`,
+        summary.outdated > 0 ? 'info' : 'success',
+      )
+      await reloadEntries()
+    } finally {
+      setCheckingHashes(false)
+    }
+  }, [addToast, checkingHashes, reloadEntries])
 
   useEffect(() => {
-    void loadInstalledScripts()
-      .then(setEntries)
-      .finally(() => setLoading(false))
-  }, [])
+    void reloadEntries()
+  }, [reloadEntries])
 
   const filtered = useMemo(() => {
     if (!librarySearch.trim()) return entries
@@ -332,15 +485,41 @@ function InstalledLibraryView(): React.ReactElement {
   return (
     <div className="page author-page">
       <p className="store-lead muted">
-        Scripts installed on this machine. Sign in to access the author studio.
+        {showSignedInCopy
+          ? 'Scripts installed on this machine. Compare local files with store versions and update as needed.'
+          : 'Scripts installed on this machine. Sign in to access the author studio.'}
       </p>
 
       <div className="section-header">
-        <span className="section-title">Installed scripts</span>
-        <span className="section-count" aria-live="polite">
-          {loading ? 'Loading…' : summary}
-        </span>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <span className="section-title">Installed scripts</span>
+          {onOpenAuthorStudio && (
+            <button type="button" className="btn btn-compact" onClick={onOpenAuthorStudio}>
+              Author studio
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <span className="section-count" aria-live="polite">
+            {loading ? 'Loading…' : summary}
+          </span>
+          <button type="button" className="btn btn-compact" onClick={() => void reloadEntries()} disabled={loading}>
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-compact"
+            disabled={loading || checkingHashes}
+            onClick={() => void checkHashUpdates()}
+            title="Compare local hashes against store hashes"
+          >
+            {checkingHashes
+              ? `Checking ${hashProgress?.done ?? 0}/${hashProgress?.total ?? 0}…`
+              : 'Check for updates'}
+          </button>
+        </div>
       </div>
+      {scanError && <p className="error">{scanError}</p>}
 
       {loading ? (
         libraryView === 'grid' ? (
@@ -359,7 +538,15 @@ function InstalledLibraryView(): React.ReactElement {
               <>
                 <div className="card-header">
                   <div className="card-icon"><IconScriptTile /></div>
-                  <span className="card-badge">v{e.contentVersion}</span>
+                  <div className="card-header-badges">
+                    {e.removedFromStore ? (
+                      <span className="card-badge card-badge-removed">Removed</span>
+                    ) : null}
+                    {e.external ? (
+                      <span className="card-badge card-badge-external">External</span>
+                    ) : null}
+                    <span className="card-badge">v{e.contentVersion}</span>
+                  </div>
                 </div>
                 <div className="card-name">{e.title}</div>
                 <div className="card-author">{e.filename}</div>
@@ -367,17 +554,19 @@ function InstalledLibraryView(): React.ReactElement {
                   <div className="card-desc line-clamp">{e.description}</div>
                 )}
                 <div className="card-footer">
-                  <span className="meta-item">Installed {relativeDate(e.installedAt)}</span>
+                  <span className="meta-item">
+                    {e.external ? `On disk · ${relativeDate(e.installedAt)}` : `Installed ${relativeDate(e.installedAt)}`}
+                  </span>
                 </div>
               </>
             )
             const cardClass = `script-card${e.needsCatalogUpdate ? ' script-card-has-update' : ''}`
             return e.slug ? (
-              <Link key={e.scriptId} to={`/script/${e.slug}`} className={cardClass}>
+              <Link key={e.entryKey} to={`/script/${e.slug}`} className={cardClass}>
                 {inner}
               </Link>
             ) : (
-              <div key={e.scriptId} className={cardClass}>
+              <div key={e.entryKey} className={cardClass}>
                 {inner}
               </div>
             )
@@ -399,18 +588,26 @@ function InstalledLibraryView(): React.ReactElement {
                   <div className="row-desc">{e.filename}</div>
                 </div>
                 <div className="row-right">
+                  {e.removedFromStore ? (
+                    <span className="card-badge card-badge-removed">Removed</span>
+                  ) : null}
+                  {e.external ? (
+                    <span className="card-badge card-badge-external">External</span>
+                  ) : null}
                   <span className="meta-item muted">v{e.contentVersion}</span>
-                  <span className="meta-item">Installed {relativeDate(e.installedAt)}</span>
+                  <span className="meta-item">
+                    {e.external ? `On disk · ${relativeDate(e.installedAt)}` : `Installed ${relativeDate(e.installedAt)}`}
+                  </span>
                 </div>
               </>
             )
             const rowClass = `script-row${e.needsCatalogUpdate ? ' script-row-has-update' : ''}`
             return e.slug ? (
-              <Link key={e.scriptId} to={`/script/${e.slug}`} className={rowClass}>
+              <Link key={e.entryKey} to={`/script/${e.slug}`} className={rowClass}>
                 {inner}
               </Link>
             ) : (
-              <div key={e.scriptId} className={rowClass}>
+              <div key={e.entryKey} className={rowClass}>
                 {inner}
               </div>
             )
@@ -428,6 +625,7 @@ function InstalledLibraryView(): React.ReactElement {
 
 export function AuthorPage(): React.ReactElement {
   const { user, canOpenAuthorStudio, canOpenAuthorStudioLoading, loading: authLoading } = useAuth()
+  const [authorView, setAuthorView] = useState<'installed' | 'studio'>('installed')
 
   if (authLoading || canOpenAuthorStudioLoading) {
     return <SkeletonLibrary count={3} />
@@ -437,10 +635,27 @@ export function AuthorPage(): React.ReactElement {
     return <InstalledLibraryView />
   }
 
-  return <AuthorStudio />
+  if (authorView === 'installed') {
+    return (
+      <InstalledLibraryView
+        showSignedInCopy
+        onOpenAuthorStudio={() => {
+          setAuthorView('studio')
+        }}
+      />
+    )
+  }
+
+  return (
+    <AuthorStudio
+      onOpenInstalledLibrary={() => {
+        setAuthorView('installed')
+      }}
+    />
+  )
 }
 
-function AuthorStudio(): React.ReactElement {
+function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () => void } = {}): React.ReactElement {
   const { user, role } = useAuth()
   const { addToast } = useToast()
   const canCreateScripts = ['author', 'moderator', 'admin'].includes(role)
@@ -529,6 +744,7 @@ function AuthorStudio(): React.ReactElement {
         id: r.id,
         filename: r.filename,
         content_version: r.content_version,
+        content_hash: r.content_hash,
         updated_at: r.updated_at,
       })),
     [filtered],
@@ -589,7 +805,7 @@ function AuthorStudio(): React.ReactElement {
     setForm((f) => mergeFormWithLuaFile(f, res.filename, res.content))
   }
 
-  async function saveDraft(): Promise<void> {
+  async function saveScript(targetStatus: Extract<ScriptStatus, 'draft' | 'published' | 'rejected'>): Promise<void> {
     if (!supabase || !user) return
     if (!form.id && !canCreateScripts) {
       addToast('Only primary authors can create new scripts. Coauthors can edit scripts they are assigned to.', 'error')
@@ -603,20 +819,25 @@ function AuthorStudio(): React.ReactElement {
         return
       }
       const lua_source = form.body
+      const content_hash = await computeLuaContentHash(lua_source)
       const tags = dedupeTags(form.tags)
       if (form.id) {
         const { error, data: updated } = await supabase.from('scripts').update({
           slug: form.slug.trim(), title: form.title.trim(), filename: form.filename.trim(),
+          status: targetStatus,
           content_version: contentVersion,
+          content_hash,
           description: form.description.trim() || null, category: form.category.trim() || null,
           tags, changelog: form.changelog.trim() || null, lua_source,
-        }).eq('id', form.id).select('content_version').single()
+        }).eq('id', form.id).select('content_version,status').single()
         if (error) {
           addToast(userFacingMessage(error), 'error')
           return
         }
 
-        const newVersion = (updated as { content_version: number }).content_version
+        const updatedRow = updated as { content_version: number; status: ScriptStatus }
+        const newVersion = updatedRow.content_version
+        setForm((f) => ({ ...f, status: updatedRow.status }))
         if (form.changelog.trim()) {
           const { error: chErr } = await supabase.from('script_changelog').upsert(
             { script_id: form.id, version: newVersion, body: form.changelog.trim() },
@@ -631,37 +852,25 @@ function AuthorStudio(): React.ReactElement {
         const { data, error } = await supabase.from('scripts').insert({
           slug: form.slug.trim(), title: form.title.trim(), filename: form.filename.trim(),
           content_version: contentVersion,
+          content_hash,
           description: form.description.trim() || null, category: form.category.trim() || null,
           tags, changelog: form.changelog.trim() || null, lua_source,
-          status: 'draft' as const, author_id: user.id,
-        }).select('id').single()
+          status: targetStatus, author_id: user.id,
+        }).select('id,status').single()
         if (error) {
           addToast(userFacingMessage(error), 'error')
           return
         }
-        setForm((f) => ({ ...f, id: (data as { id: string }).id, status: 'draft' }))
+        const inserted = data as { id: string; status: ScriptStatus }
+        setForm((f) => ({ ...f, id: inserted.id, status: inserted.status }))
       }
-      addToast('Saved draft.', 'success')
-      await loadMine()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function submitReview(): Promise<void> {
-    if (!supabase || !form.id) {
-      addToast('Save a draft first.', 'error')
-      return
-    }
-    setBusy(true)
-    try {
-      const { error } = await supabase.from('scripts').update({ status: 'pending_review' }).eq('id', form.id)
-      if (error) {
-        addToast(userFacingMessage(error), 'error')
-        return
+      if (targetStatus === 'published') {
+        addToast('Published to store.', 'success')
+      } else if (targetStatus === 'rejected') {
+        addToast('Hidden from store.', 'success')
+      } else {
+        addToast('Saved draft.', 'success')
       }
-      setForm((f) => ({ ...f, status: 'pending_review' }))
-      addToast('Submitted for review.', 'success')
       await loadMine()
     } finally {
       setBusy(false)
@@ -720,7 +929,14 @@ function AuthorStudio(): React.ReactElement {
         </div>
 
         <div className="section-header">
-          <span className="section-title">{canCreateScripts ? 'Your scripts' : 'Assigned scripts'}</span>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <span className="section-title">{canCreateScripts ? 'Your scripts' : 'Assigned scripts'}</span>
+            {onOpenInstalledLibrary && (
+              <button type="button" className="btn btn-compact" onClick={onOpenInstalledLibrary}>
+                Installed scripts
+              </button>
+            )}
+          </div>
           <span className="section-count">{filtered.length} script{filtered.length !== 1 ? 's' : ''}</span>
         </div>
 
@@ -935,22 +1151,30 @@ function AuthorStudio(): React.ReactElement {
         </div>
 
         <div className="author-actions">
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void saveDraft()}>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void saveScript('draft')}>
             Save draft
           </button>
           <button
             type="button"
             className="btn"
-            disabled={busy || !form.id || !['draft', 'rejected'].includes(form.status)}
-            onClick={() => void submitReview()}
+            disabled={busy}
+            onClick={() => void saveScript('published')}
           >
-            Submit for review
+            Publish
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => void saveScript('rejected')}
+          >
+            Hide from store
           </button>
           {form.id && (
             <Link to={`/script/${form.slug}`} className="btn">Store page</Link>
           )}
           {form.id && (
-            <span className="muted small" style={{ alignSelf: 'center' }}>{form.status}</span>
+            <span className="muted small" style={{ alignSelf: 'center' }}>{statusLabel(form.status)}</span>
           )}
           {form.id && ['draft'].includes(form.status) && (
             <button type="button" className="btn danger" style={{ marginLeft: 'auto' }} onClick={() => void deleteDraft(form.id!)}>

@@ -12,23 +12,8 @@ import { LoginPage } from './pages/LoginPage.tsx'
 import { ResetPasswordPage } from './pages/ResetPasswordPage.tsx'
 import { AuthorPage } from './pages/AuthorPage.tsx'
 import { AuthorProfilePage } from './pages/AuthorProfilePage.tsx'
-import { ModeratorPage } from './pages/ModeratorPage.tsx'
 import { AdminPage } from './pages/AdminPage.tsx'
 import { PrivacyPolicyPage, TermsOfServicePage } from './pages/LegalDocsPages.tsx'
-
-function ModeratorRoute({ children }: { children: ReactNode }): React.ReactElement {
-  const { user, role, loading } = useAuth()
-  if (loading) {
-    return <div className="page-loading">Loading…</div>
-  }
-  if (!user) {
-    return <Navigate to="/login" replace />
-  }
-  if (!['moderator', 'admin'].includes(role)) {
-    return <Navigate to="/" replace />
-  }
-  return <>{children}</>
-}
 
 function AdminRoute({ children }: { children: ReactNode }): React.ReactElement {
   const { user, role, loading } = useAuth()
@@ -61,14 +46,6 @@ export default function App(): React.ReactElement {
             <Route path="legal/privacy" element={<PrivacyPolicyPage />} />
             <Route path="author/:authorId" element={<AuthorProfilePage />} />
             <Route path="author" element={<AuthorPage />} />
-            <Route
-              path="moderator"
-              element={
-                <ModeratorRoute>
-                  <ModeratorPage />
-                </ModeratorRoute>
-              }
-            />
             <Route
               path="admin"
               element={

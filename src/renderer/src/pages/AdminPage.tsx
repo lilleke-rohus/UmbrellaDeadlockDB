@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { userFacingMessage } from '../lib/userFacingError'
 import type { AdminSettingRow, ProfileRole, ScriptRow } from '../../../shared/supabase.types'
+import { Modal } from '../components/Modal'
 
 type AdminProfileRow = {
   id: string
@@ -26,8 +27,22 @@ type CoauthorRow = {
 
 const ROLE_OPTIONS: ProfileRole[] = ['reader', 'author', 'moderator', 'admin']
 
-type ScriptListRow = Pick<ScriptRow, 'id' | 'slug' | 'title' | 'author_id' | 'status'> & {
+type ScriptListRow = Pick<ScriptRow, 'id' | 'slug' | 'title' | 'author_id' | 'status' | 'content_hash' | 'rejected_reason'> & {
   author_display_name_override?: string | null
+}
+
+const SCRIPT_STATUS_PILL_CLASS: Readonly<Record<ScriptRow['status'], string>> = {
+  draft: '',
+  pending_review: 'pending',
+  published: 'active',
+  rejected: 'flagged',
+}
+
+const SCRIPT_STATUS_LABEL: Readonly<Record<ScriptRow['status'], string>> = {
+  draft: 'Draft',
+  pending_review: 'Pending',
+  published: 'Published',
+  rejected: 'Hidden',
 }
 
 function normalizeCoauthorRows(data: unknown): CoauthorRow[] {
@@ -49,11 +64,9 @@ export function AdminPage(): React.ReactElement {
   const [coauthors, setCoauthors] = useState<CoauthorRow[]>([])
   const [busy, setBusy] = useState(false)
 
-  const [coScriptId, setCoScriptId] = useState('')
-  const [coProfileId, setCoProfileId] = useState('')
-
-  const [overrideScriptId, setOverrideScriptId] = useState('')
-  const [overrideName, setOverrideName] = useState('')
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null)
+  const [editCoProfileId, setEditCoProfileId] = useState('')
+  const [editOverrideName, setEditOverrideName] = useState('')
 
   const [setKey, setSetKey] = useState('')
   const [setValueJson, setSetValueJson] = useState('{}')
@@ -76,7 +89,7 @@ export function AdminPage(): React.ReactElement {
     }
     const { data, error } = await supabase
       .from('scripts')
-      .select('id, slug, title, author_id, status, author_display_name_override')
+      .select('id, slug, title, author_id, status, content_hash, rejected_reason, author_display_name_override')
       .order('updated_at', { ascending: false })
       .limit(500)
     if (error) {
@@ -153,25 +166,93 @@ export function AdminPage(): React.ReactElement {
     }
   }
 
-  async function saveAuthorOverride(): Promise<void> {
-    if (!supabase || !overrideScriptId) {
-      addToast('Select a script first.', 'error')
+  async function saveAuthorOverrideForScript(scriptId: string): Promise<void> {
+    if (!supabase) {
       return
     }
     const client = supabase
     await runBusyTask(async () => {
-      const value = overrideName.trim() || null
+      const value = editOverrideName.trim() || null
       const { error } = await client
         .from('scripts')
         .update({ author_display_name_override: value })
-        .eq('id', overrideScriptId)
+        .eq('id', scriptId)
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
       }
-      setOverrideName('')
-      setOverrideScriptId('')
+      addToast('Author override saved.', 'success')
       await loadScripts()
+    })
+  }
+
+  async function generateMissingHashes(): Promise<void> {
+    if (!supabase) {
+      return
+    }
+    await runBusyTask(async () => {
+      const { data, error } = await supabase.rpc('admin_generate_missing_script_hashes')
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
+      const updatedCount = typeof data === 'number' ? data : Number(data ?? 0)
+      addToast(
+        updatedCount > 0
+          ? `Generated ${updatedCount} missing script hash${updatedCount === 1 ? '' : 'es'}.`
+          : 'All scripts already have hashes.',
+        'success',
+      )
+      await loadScripts()
+    })
+  }
+
+  async function hideScript(script: ScriptListRow): Promise<void> {
+    if (!supabase) return
+    await runBusyTask(async () => {
+      const { error } = await supabase
+        .from('scripts')
+        .update({ status: 'rejected', rejected_reason: 'Hidden by admin' })
+        .eq('id', script.id)
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
+      addToast(`Hidden "${script.title}" from the store.`, 'success')
+      await loadScripts()
+    })
+  }
+
+  async function showScript(script: ScriptListRow): Promise<void> {
+    if (!supabase) return
+    await runBusyTask(async () => {
+      const { error } = await supabase
+        .from('scripts')
+        .update({ status: 'published', rejected_reason: null })
+        .eq('id', script.id)
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
+      addToast(`Published "${script.title}" to the store.`, 'success')
+      await loadScripts()
+    })
+  }
+
+  async function deleteScript(script: ScriptListRow): Promise<void> {
+    if (!supabase) return
+    if (!confirm(`Delete "${script.title}" permanently?`)) {
+      return
+    }
+    await runBusyTask(async () => {
+      const { error } = await supabase.from('scripts').delete().eq('id', script.id)
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
+      addToast(`Deleted "${script.title}".`, 'success')
+      await loadScripts()
+      await loadCoauthors()
     })
   }
 
@@ -187,6 +268,7 @@ export function AdminPage(): React.ReactElement {
         addToast(userFacingMessage(error), 'error')
         return
       }
+      setEditOverrideName('')
       await loadScripts()
     })
   }
@@ -238,22 +320,22 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  async function addCoauthor(): Promise<void> {
-    if (!supabase || !coScriptId || !coProfileId.trim()) {
-      addToast('Choose a script and enter a profile UUID.', 'error')
+  async function addCoauthorToScript(scriptId: string): Promise<void> {
+    if (!supabase || !editCoProfileId.trim()) {
+      addToast('Enter a profile UUID.', 'error')
       return
     }
     const client = supabase
     await runBusyTask(async () => {
       const { error } = await client.from('script_coauthors').insert({
-        script_id: coScriptId,
-        profile_id: coProfileId.trim()
+        script_id: scriptId,
+        profile_id: editCoProfileId.trim()
       })
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
       }
-      setCoProfileId('')
+      setEditCoProfileId('')
       await loadCoauthors()
     })
   }
@@ -273,25 +355,28 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  const scriptOptions = useMemo(
-    () => scripts.map((s) => ({ id: s.id, label: `${s.slug} — ${s.title}` })),
+  const missingHashCount = useMemo(() => scripts.filter((s) => !s.content_hash).length, [scripts])
+  const storeManagedScripts = useMemo(
+    () => scripts.filter((script) => script.status === 'published' || script.status === 'rejected'),
     [scripts],
   )
-
-  const pendingCount = useMemo(() => scripts.filter((s) => s.status === 'pending_review').length, [scripts])
-  const scriptsWithOverrides = useMemo(
-    () => scripts.filter((script) => script.author_display_name_override),
-    [scripts],
+  const editingScript = useMemo(
+    () => (editingScriptId ? scripts.find((script) => script.id === editingScriptId) ?? null : null),
+    [editingScriptId, scripts],
+  )
+  const editingScriptCoauthors = useMemo(
+    () => (editingScript ? coauthors.filter((coauthor) => coauthor.script_id === editingScript.id) : []),
+    [coauthors, editingScript],
   )
 
   const stats = useMemo(
     () => [
       { label: 'Total scripts', val: scripts.length },
       { label: 'Users', val: profiles.length },
-      { label: 'Pending review', val: pendingCount },
+      { label: 'Missing hashes', val: missingHashCount },
       { label: 'Coauthors', val: coauthors.length },
     ],
-    [scripts.length, profiles.length, pendingCount, coauthors.length],
+    [scripts.length, profiles.length, missingHashCount, coauthors.length],
   )
 
   return (
@@ -311,6 +396,187 @@ export function AdminPage(): React.ReactElement {
           </div>
         ))}
       </div>
+
+      <section className="settings-section">
+        <div className="settings-section-title">Script hashes</div>
+        <p className="setting-desc" style={{ marginBottom: 12 }}>
+          Hashes are used for update checks. Generate only missing hashes without touching existing values.
+        </p>
+        <div className="row gap wrap" style={{ alignItems: 'center' }}>
+          <span className="muted">{missingHashCount} script{missingHashCount === 1 ? '' : 's'} missing hash</span>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void generateMissingHashes()}>
+            Generate missing hashes
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-title">Store visibility</div>
+        <p className="setting-desc" style={{ marginBottom: 12 }}>
+          Hide scripts from the store, republish hidden scripts, delete scripts, and manage store collaborators.
+        </p>
+        <div className="admin-scroll">
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Script</th>
+                  <th>Slug</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {storeManagedScripts.map((script) => (
+                  <tr key={script.id}>
+                    <td>
+                      <strong>{script.title}</strong>
+                    </td>
+                    <td className="mono small">{script.slug}</td>
+                    <td>
+                      <span className={`status-pill ${SCRIPT_STATUS_PILL_CLASS[script.status]}`}>
+                        {SCRIPT_STATUS_LABEL[script.status]}
+                      </span>
+                    </td>
+                    <td className="small muted">{script.rejected_reason ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => {
+                            if (editingScriptId === script.id) {
+                              setEditingScriptId(null)
+                              setEditCoProfileId('')
+                              setEditOverrideName('')
+                              return
+                            }
+                            setEditingScriptId(script.id)
+                            setEditCoProfileId('')
+                            setEditOverrideName(script.author_display_name_override ?? '')
+                          }}
+                        >
+                          {editingScriptId === script.id ? 'Close edit' : 'Edit'}
+                        </button>
+                        {script.status === 'published' ? (
+                          <button type="button" className="btn" disabled={busy} onClick={() => void hideScript(script)}>
+                            Hide
+                          </button>
+                        ) : (
+                          <button type="button" className="btn" disabled={busy} onClick={() => void showScript(script)}>
+                            Show
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn danger"
+                          disabled={busy}
+                          onClick={() => void deleteScript(script)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {!storeManagedScripts.length && <p className="muted">No published or hidden scripts.</p>}
+      </section>
+
+      <Modal
+        isOpen={Boolean(editingScript)}
+        title={editingScript ? `Edit script: ${editingScript.title}` : 'Edit script'}
+        onClose={() => {
+          setEditingScriptId(null)
+          setEditCoProfileId('')
+          setEditOverrideName('')
+        }}
+      >
+        {editingScript && (
+          <>
+            <p className="setting-desc" style={{ marginBottom: 12 }}>
+              Manage coauthors and author display override for this script.
+            </p>
+            <div className="setting-block">
+              <div className="row gap wrap" style={{ alignItems: 'flex-end', width: '100%' }}>
+                <label className="field grow" style={{ marginBottom: 0, flex: '1 1 220px' }}>
+                  <span>Add coauthor (Profile UUID)</span>
+                  <input
+                    className="mono field-input"
+                    value={editCoProfileId}
+                    disabled={busy}
+                    onChange={(e) => setEditCoProfileId(e.target.value)}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void addCoauthorToScript(editingScript.id)}
+                >
+                  Add coauthor
+                </button>
+              </div>
+            </div>
+            <ul className="co-list" style={{ marginTop: '1rem' }}>
+              {editingScriptCoauthors.map((coauthor) => (
+                <li key={coauthor.id} className="co-card">
+                  <div>
+                    <strong>{coauthor.profile_id}</strong>
+                    <div className="muted small">Added {new Date(coauthor.created_at).toLocaleDateString()}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn danger"
+                    disabled={busy}
+                    onClick={() => void removeCoauthor(coauthor.id)}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {!editingScriptCoauthors.length && <p className="muted">No coauthors for this script.</p>}
+
+            <div className="setting-block" style={{ marginTop: '1rem' }}>
+              <div className="row gap wrap" style={{ alignItems: 'flex-end', width: '100%' }}>
+                <label className="field grow" style={{ marginBottom: 0, flex: '1 1 220px' }}>
+                  <span>Author display override</span>
+                  <input
+                    className="field-input"
+                    value={editOverrideName}
+                    disabled={busy}
+                    placeholder="e.g. Umbrella Team"
+                    onChange={(e) => setEditOverrideName(e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void saveAuthorOverrideForScript(editingScript.id)}
+                >
+                  Save override
+                </button>
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={busy}
+                  onClick={() => void clearAuthorOverride(editingScript.id)}
+                >
+                  Clear override
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </Modal>
 
       <section className="settings-section">
         <div className="settings-section-title">Users</div>
@@ -390,132 +656,6 @@ export function AdminPage(): React.ReactElement {
           </div>
         </div>
         {!profiles.length && <p className="muted">No rows (or not an admin).</p>}
-      </section>
-
-      <section className="settings-section">
-        <div className="settings-section-title">Coauthors</div>
-        <p className="setting-desc" style={{ marginBottom: 12 }}>
-          Paste the user&apos;s profile UUID from the table above.
-        </p>
-        <div className="setting-block">
-          <div className="row gap wrap" style={{ alignItems: 'flex-end', width: '100%' }}>
-            <label className="field" style={{ marginBottom: 0, minWidth: '12rem', flex: '1 1 200px' }}>
-              <span>Script</span>
-              <select
-                className="admin-select wide"
-                value={coScriptId}
-                disabled={busy}
-                onChange={(e) => setCoScriptId(e.target.value)}
-              >
-                <option value="">Select…</option>
-                {scriptOptions.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field grow" style={{ marginBottom: 0, flex: '1 1 220px' }}>
-              <span>Profile UUID</span>
-              <input
-                className="mono field-input"
-                value={coProfileId}
-                disabled={busy}
-                onChange={(e) => setCoProfileId(e.target.value)}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              />
-            </label>
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void addCoauthor()}>
-              Add
-            </button>
-          </div>
-        </div>
-        <ul className="co-list" style={{ marginTop: '1rem' }}>
-          {coauthors.map((c) => (
-            <li key={c.id} className="co-card">
-              <div>
-                <strong>{c.scripts?.title ?? c.script_id}</strong>
-                <span className="muted small"> · {c.scripts?.slug}</span>
-                <div className="muted small mono" style={{ marginTop: '0.25rem' }}>
-                  {c.profile_id}
-                </div>
-              </div>
-              <button type="button" className="btn danger" disabled={busy} onClick={() => void removeCoauthor(c.id)}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-        {!coauthors.length && <p className="muted">No coauthors.</p>}
-      </section>
-
-      <section className="settings-section">
-        <div className="settings-section-title">Author name overrides</div>
-        <p className="setting-desc" style={{ marginBottom: 12 }}>
-          Override the displayed author name on any script. Leave blank to clear and restore the real name.
-        </p>
-        <div className="setting-block">
-          <div className="row gap wrap" style={{ alignItems: 'flex-end', width: '100%' }}>
-            <label className="field" style={{ marginBottom: 0, minWidth: '12rem', flex: '1 1 200px' }}>
-              <span>Script</span>
-              <select
-                className="admin-select wide"
-                value={overrideScriptId}
-                disabled={busy}
-                onChange={(e) => {
-                  const id = e.target.value
-                  setOverrideScriptId(id)
-                  const existing = scripts.find((s) => s.id === id)?.author_display_name_override ?? ''
-                  setOverrideName(existing ?? '')
-                }}
-              >
-                <option value="">Select…</option>
-                {scriptOptions.map((o) => (
-                  <option key={o.id} value={o.id}>{o.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field grow" style={{ marginBottom: 0, flex: '1 1 180px' }}>
-              <span>Display name override</span>
-              <input
-                className="field-input"
-                value={overrideName}
-                disabled={busy}
-                placeholder="e.g. Umbrella Team"
-                onChange={(e) => setOverrideName(e.target.value)}
-              />
-            </label>
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void saveAuthorOverride()}>
-              Save
-            </button>
-          </div>
-        </div>
-        {scriptsWithOverrides.length > 0 && (
-          <ul className="co-list" style={{ marginTop: '1rem' }}>
-            {scriptsWithOverrides.map((s) => (
-                <li key={s.id} className="co-card">
-                  <div>
-                    <strong>{s.title}</strong>
-                    <span className="muted small"> · {s.slug}</span>
-                    <div className="muted small" style={{ marginTop: '0.25rem' }}>
-                      Showing as: <strong>{s.author_display_name_override}</strong>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn danger"
-                    disabled={busy}
-                    onClick={() => void clearAuthorOverride(s.id)}
-                  >
-                    Clear
-                  </button>
-                </li>
-              ))}
-          </ul>
-        )}
-        {!scriptsWithOverrides.length && (
-          <p className="muted" style={{ marginTop: '0.75rem' }}>No overrides set.</p>
-        )}
       </section>
 
       <section className="settings-section">

@@ -11,7 +11,6 @@ import {
   IconLibrary,
   IconList,
   IconLogo,
-  IconReview,
   IconSearch,
   IconSettings,
   IconStore,
@@ -42,7 +41,6 @@ type RouteFlags = {
   isScriptDetail: boolean
   isLibrary: boolean
   isSettings: boolean
-  isReview: boolean
   isAdmin: boolean
 }
 
@@ -178,7 +176,6 @@ function routeFlagsFromPath(pathname: string): RouteFlags {
     isScriptDetail: pathname.startsWith('/script/'),
     isLibrary: pathname === '/author',
     isSettings: pathname.startsWith('/settings'),
-    isReview: pathname.startsWith('/moderator'),
     isAdmin: pathname.startsWith('/admin'),
   }
 }
@@ -187,7 +184,6 @@ function pageTitleFromRoute(r: RouteFlags): string {
   if (r.isStoreRoot || r.isScriptDetail) return 'Store'
   if (r.isLibrary) return 'Library'
   if (r.isSettings) return 'Settings'
-  if (r.isReview) return 'Review'
   if (r.isAdmin) return 'Admin'
   return APP_DISPLAY_NAME
 }
@@ -293,7 +289,6 @@ type AuthUser = NonNullable<ReturnType<typeof useAuth>['user']>
 type AuthRole = ReturnType<typeof useAuth>['role']
 
 function SidebarMainNav({ user, role }: { user: AuthUser | null; role: AuthRole }): ReactElement {
-  const showReview = user && ['moderator', 'admin'].includes(role)
   const showAdmin = user && role === 'admin'
 
   return (
@@ -316,12 +311,6 @@ function SidebarMainNav({ user, role }: { user: AuthUser | null; role: AuthRole 
         Settings
         {!supabaseConfigured && <span className="nav-badge">!</span>}
       </NavLink>
-      {showReview && (
-        <NavLink to="/moderator" className={({ isActive }) => navItemClassName(isActive)}>
-          <IconReview />
-          Review
-        </NavLink>
-      )}
       {showAdmin && (
         <NavLink to="/admin" className={({ isActive }) => navItemClassName(isActive)}>
           <IconAdmin />

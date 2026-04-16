@@ -853,6 +853,26 @@ select {
   border: 0.5px solid var(--color-border-tertiary);
 }
 
+.card-header-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.card-badge-external {
+  background: rgba(234, 88, 12, 0.18);
+  color: #fdba74;
+  border-color: rgba(249, 115, 22, 0.45);
+}
+
+.card-badge-removed {
+  background: rgba(190, 24, 93, 0.18);
+  color: #f9a8d4;
+  border-color: rgba(244, 114, 182, 0.45);
+}
+
 .card-name {
   font-size: 13px;
   font-weight: 500;
@@ -2225,4 +2245,53 @@ kbd {
 
 .author-back:hover {
   color: var(--color-text-primary);
+}
+
+.app-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(8, 10, 14, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.app-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border-radius: 10px;
+  border: 0.5px solid var(--color-border-secondary);
+  background: var(--color-background-primary);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.48);
+}
+
+.app-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 0.5px solid var(--color-border-secondary);
+}
+
+.app-modal-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.app-modal-body {
+  padding: 14px;
+}
+
+.app-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 0.5px solid var(--color-border-secondary);
 }

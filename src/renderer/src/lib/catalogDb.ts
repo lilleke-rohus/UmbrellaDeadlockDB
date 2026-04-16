@@ -10,6 +10,7 @@ export type CachedScriptMeta = {
   filename: string
   status: string
   content_version: number
+  content_hash: string | null
   updated_at: string
   published_at: string | null
   author_id: string

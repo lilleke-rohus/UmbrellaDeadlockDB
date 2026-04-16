@@ -15,6 +15,7 @@ export type ScriptRow = {
   published_at: string | null
   rejected_reason: string | null
   content_version: number
+  content_hash: string | null
   updated_at: string
   created_at: string
   author_id: string
