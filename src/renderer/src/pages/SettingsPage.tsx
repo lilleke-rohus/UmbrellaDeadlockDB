@@ -38,7 +38,7 @@ function buildUpdateMessage(result: { updated: number; errors: string[] }): Upda
 }
 
 function signedInDescription(
-  email: string | undefined,
+  displayName: string | undefined,
   role: string,
   profileState: {
     profileLoaded: boolean
@@ -50,20 +50,20 @@ function signedInDescription(
   if (!profileState.profileLoaded && profileState.authLoading) {
     return (
       <>
-        <strong>{email}</strong> · loading profile…
+        <strong>{displayName}</strong> · loading profile…
       </>
     )
   }
   if (!profileState.profileLoaded) {
     return (
       <>
-        <strong>{email}</strong> · profile not loaded (check database / RLS)
+        <strong>{displayName}</strong> · profile not loaded (check database / RLS)
       </>
     )
   }
   return (
     <>
-      <strong>{email}</strong> · role: <strong>{role}</strong>
+      <strong>{displayName}</strong> · role: <strong>{role}</strong>
       {profileState.verifiedDeveloper ? (
         <>
           {' '}
@@ -85,13 +85,10 @@ type AccountSectionProps = {
   role: ReturnType<typeof useAuth>['role']
   authLoading: boolean
   profile: ReturnType<typeof useAuth>['profile']
-  accountName: string
   accountBusy: boolean
   accountError: string | null
   accountSuccess: string | null
   showEnableAuthor: boolean
-  onAccountNameChange: (value: string) => void
-  onSaveDisplayName: () => void
   onEnableAuthor: () => void
 }
 
@@ -101,15 +98,14 @@ function AccountSection(props: AccountSectionProps): React.ReactElement {
     role,
     authLoading,
     profile,
-    accountName,
     accountBusy,
     accountError,
     accountSuccess,
     showEnableAuthor,
-    onAccountNameChange,
-    onSaveDisplayName,
     onEnableAuthor,
   } = props
+
+  const displayName = profile?.display_name ?? user?.user_metadata?.display_name ?? ''
 
   return (
     <section className="settings-section">
@@ -130,7 +126,7 @@ function AccountSection(props: AccountSectionProps): React.ReactElement {
             <div>
               <div className="setting-label">Signed in</div>
               <div className="setting-desc">
-                {signedInDescription(user.email, role, {
+                {signedInDescription(displayName, role, {
                   profileLoaded: Boolean(profile),
                   verifiedDeveloper: Boolean(profile?.verified_developer),
                   authorBlocked: Boolean(profile?.author_blocked),
@@ -153,33 +149,6 @@ function AccountSection(props: AccountSectionProps): React.ReactElement {
               </div>
             </div>
           ) : null}
-
-          <div className="setting-row">
-            <div>
-              <div className="setting-label">Display name</div>
-              <div className="setting-desc">Shown on your published scripts</div>
-            </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-              <input
-                id="settings-display-name"
-                className="field-input"
-                style={{ width: 160 }}
-                value={accountName}
-                onChange={(e) => onAccountNameChange(e.target.value)}
-                placeholder="Your name"
-                autoComplete="nickname"
-              />
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={SMALL_BUTTON_STYLE}
-                disabled={accountBusy || !supabase}
-                onClick={onSaveDisplayName}
-              >
-                Save
-              </button>
-            </div>
-          </div>
 
           {showEnableAuthor ? (
             <div className="setting-row">
@@ -446,11 +415,10 @@ function LegalSection(): React.ReactElement {
 }
 
 export function SettingsPage(): React.ReactElement {
-  const { user, profile, role, refreshProfile, loading: authLoading } = useAuth()
+  const { user, profile, role, loading: authLoading } = useAuth()
   const { addToast } = useToast()
   const [root, setRoot] = useState('')
   const [lastSync, setLastSync] = useState<string | null>(null)
-  const [accountName, setAccountName] = useState('')
   const [accountBusy, setAccountBusy] = useState(false)
   const [accountError, setAccountError] = useState<string | null>(null)
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null)
@@ -473,16 +441,6 @@ export function SettingsPage(): React.ReactElement {
     void getLastSyncedAt().then(setLastSync)
   }, [])
 
-  useEffect(() => {
-    if (!user) {
-      setAccountName('')
-      return
-    }
-    const fromProfile = profile?.display_name
-    const fromMeta = typeof user.user_metadata?.display_name === 'string' ? user.user_metadata.display_name : ''
-    setAccountName((fromProfile ?? fromMeta ?? '').trim())
-  }, [user, profile])
-
   async function pickFolder(): Promise<void> {
     const picked = await window.umbrella.pickScriptsDirectory()
     if (picked) {
@@ -497,28 +455,6 @@ export function SettingsPage(): React.ReactElement {
       return
     }
     addToast('Saved scripts folder.', 'success')
-  }
-
-  async function saveDisplayName(): Promise<void> {
-    if (!supabase || !user) return
-    setAccountBusy(true)
-    setAccountError(null)
-    setAccountSuccess(null)
-    try {
-      const trimmed = accountName.trim()
-      const { error } = await supabase
-        .from('profiles')
-        .update({ display_name: trimmed || null })
-        .eq('id', user.id)
-      if (error) {
-        setAccountError(error.message)
-        return
-      }
-      await refreshProfile()
-      setAccountSuccess('Display name saved.')
-    } finally {
-      setAccountBusy(false)
-    }
   }
 
   async function enableAuthor(): Promise<void> {
@@ -591,13 +527,10 @@ export function SettingsPage(): React.ReactElement {
         role={role}
         authLoading={authLoading}
         profile={profile}
-        accountName={accountName}
         accountBusy={accountBusy}
         accountError={accountError}
         accountSuccess={accountSuccess}
         showEnableAuthor={showEnableAuthor}
-        onAccountNameChange={setAccountName}
-        onSaveDisplayName={() => void saveDisplayName()}
         onEnableAuthor={() => void enableAuthor()}
       />
       {user ? (

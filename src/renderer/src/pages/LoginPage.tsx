@@ -1,33 +1,18 @@
 import { useEffect, useState, type FormEvent, type MouseEvent, type ReactElement } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useToast } from '../context/ToastContext'
 import { AuthLuxInput } from '../components/auth/AuthLuxInput'
 import { APP_DISPLAY_NAME } from '../lib/appDisplayName'
 import { supabaseConfigured } from '../lib/supabase'
-
-function mapPasswordResetError(message: string): string {
-  const normalized = message.trim().toLowerCase()
-  if (
-    normalized.includes('email rate limit exceeded') ||
-    normalized.includes('over_email_send_rate_limit')
-  ) {
-    return 'Email is busy, try again in an hour.'
-  }
-  return message
-}
+import { validateDisplayName } from '../lib/displayName'
 
 export function LoginPage(): ReactElement {
-  const { user, signIn, signUp, requestPasswordReset } = useAuth()
-  const { addToast } = useToast()
+  const { user, signIn, signUp } = useAuth()
   const [mode, setMode] = useState<'in' | 'up'>('in')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [signupNotice, setSignupNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [forgotBusy, setForgotBusy] = useState(false)
   const [orbPos, setOrbPos] = useState({ x: 0, y: 0 })
   const [orbActive, setOrbActive] = useState(false)
 
@@ -42,7 +27,6 @@ export function LoginPage(): ReactElement {
   function switchMode(next: 'in' | 'up'): void {
     setMode(next)
     setError(null)
-    setSignupNotice(null)
   }
 
   function onPanelMouseMove(e: MouseEvent<HTMLDivElement>): void {
@@ -53,42 +37,24 @@ export function LoginPage(): ReactElement {
     })
   }
 
-  async function sendPasswordReset(): Promise<void> {
-    setError(null)
-    if (!supabaseConfigured) {
-      return
-    }
-    setForgotBusy(true)
-    try {
-      const res = await requestPasswordReset(email)
-      if (res.error) {
-        setError(mapPasswordResetError(res.error))
-        return
-      }
-      addToast('If that email is registered, we sent a reset link. Check your inbox.', 'success')
-    } finally {
-      setForgotBusy(false)
-    }
-  }
-
   async function submit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault()
     setError(null)
-    setSignupNotice(null)
-    setBusy(true)
-    try {
-      if (mode === 'in') {
-        const res = await signIn(email, password)
-        setError(res.error)
+
+    if (mode === 'up') {
+      const validationError = validateDisplayName(displayName)
+      if (validationError) {
+        setError(validationError)
         return
       }
-      const res = await signUp(email, password, displayName || email.split('@')[0] || 'Author')
+    }
+
+    setBusy(true)
+    try {
+      const res = mode === 'in'
+        ? await signIn(displayName, password)
+        : await signUp(displayName, password)
       setError(res.error)
-      if (!res.error && res.pendingEmailConfirmation) {
-        setSignupNotice(
-          'Check your email for a confirmation link. After you confirm, sign in here and open Settings to set your display name and enable author tools.'
-        )
-      }
     } finally {
       setBusy(false)
     }
@@ -126,26 +92,13 @@ export function LoginPage(): ReactElement {
             ) : null}
 
             <form className="auth-shell-form" onSubmit={(ev) => void submit(ev)} noValidate aria-busy={busy}>
-              {mode === 'up' ? (
-                <AuthLuxInput
-                  id="signup-display-name"
-                  label="Display name"
-                  placeholder="Display name"
-                  value={displayName}
-                  onChange={(ev) => setDisplayName(ev.target.value)}
-                  autoComplete="name"
-                  disabled={!supabaseConfigured}
-                />
-              ) : null}
-
               <AuthLuxInput
-                id="auth-email"
-                placeholder="Email"
-                type="email"
-                value={email}
-                onChange={(ev) => setEmail(ev.target.value)}
+                id="auth-display-name"
+                placeholder="Display name"
+                value={displayName}
+                onChange={(ev) => setDisplayName(ev.target.value)}
                 required
-                autoComplete="email"
+                autoComplete="username"
                 disabled={!supabaseConfigured}
               />
               <AuthLuxInput
@@ -160,29 +113,11 @@ export function LoginPage(): ReactElement {
                 disabled={!supabaseConfigured}
               />
 
-              {mode === 'in' ? (
-                <div className="auth-shell-forgot-wrap">
-                  <button
-                    type="button"
-                    className="linkish auth-shell-forgot-btn"
-                    disabled={forgotBusy || !supabaseConfigured}
-                    onClick={() => void sendPasswordReset()}
-                  >
-                    {forgotBusy ? 'Sending…' : 'Forgot your password?'}
-                  </button>
-                </div>
-              ) : (
-                <span className="auth-shell-forgot-spacer" aria-hidden="true" />
-              )}
+              <span className="auth-shell-forgot-spacer" aria-hidden="true" />
 
               {error ? (
                 <p className="error feedback auth-shell-feedback" role="alert">
                   {error}
-                </p>
-              ) : null}
-              {signupNotice ? (
-                <p className="success feedback auth-shell-feedback" role="status">
-                  {signupNotice}
                 </p>
               ) : null}
 

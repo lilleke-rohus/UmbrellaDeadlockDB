@@ -9,13 +9,18 @@ import {
   type ReactNode
 } from 'react'
 import type { ProfileRole, ProfileRow } from '../../../shared/supabase.types'
-import { getPasswordResetRedirectTo } from '../lib/authRedirect'
+import {
+  DISPLAY_NAME_TAKEN_MESSAGE,
+  isDisplayNameConflictError,
+  isDisplayNameTaken,
+  normalizeDisplayName,
+  toFakeEmail,
+  validateDisplayName
+} from '../lib/displayName'
 import { supabase, supabaseConfigured } from '../lib/supabase'
 
 export type SignUpResult = {
   error: string | null
-  /** True when the project requires email confirmation and no session was issued yet. */
-  pendingEmailConfirmation?: boolean
 }
 
 type AuthState = {
@@ -24,17 +29,14 @@ type AuthState = {
   profile: ProfileRow | null
   loading: boolean
   role: ProfileRole
-  /** True if user should see Author / studio (author+ or script coauthor). */
   canOpenAuthorStudio: boolean
-  /** True while the coauthor RPC is in-flight for reader-role users. */
   canOpenAuthorStudioLoading: boolean
 }
 
 const AuthContext = createContext<
   AuthState & {
-    signIn: (email: string, password: string) => Promise<{ error: string | null }>
-    signUp: (email: string, password: string, displayName: string) => Promise<SignUpResult>
-    requestPasswordReset: (email: string) => Promise<{ error: string | null }>
+    signIn: (displayName: string, password: string) => Promise<{ error: string | null }>
+    signUp: (displayName: string, password: string) => Promise<SignUpResult>
     signOut: () => Promise<void>
     refreshProfile: () => Promise<void>
   }
@@ -150,40 +152,44 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
       canOpenAuthorStudio,
       canOpenAuthorStudioLoading,
       refreshProfile,
-      signIn: async (email: string, password: string) => {
+      signIn: async (displayName: string, password: string) => {
         if (!supabase) {
           return { error: 'Supabase is not configured' }
         }
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        const { error } = await supabase.auth.signInWithPassword({
+          email: toFakeEmail(normalizeDisplayName(displayName)),
+          password
+        })
         return { error: error?.message ?? null }
       },
-      signUp: async (email: string, password: string, displayName: string): Promise<SignUpResult> => {
+      signUp: async (displayName: string, password: string): Promise<SignUpResult> => {
         if (!supabase) {
           return { error: 'Supabase is not configured' }
         }
-        const { data, error } = await supabase.auth.signUp({
-          email,
+        const normalizedDisplayName = normalizeDisplayName(displayName)
+        const validationError = validateDisplayName(normalizedDisplayName)
+        if (validationError) {
+          return { error: validationError }
+        }
+        const duplicateCheck = await isDisplayNameTaken(normalizedDisplayName)
+        if (duplicateCheck.error) {
+          return { error: duplicateCheck.error }
+        }
+        if (duplicateCheck.taken) {
+          return { error: DISPLAY_NAME_TAKEN_MESSAGE }
+        }
+        const { error } = await supabase.auth.signUp({
+          email: toFakeEmail(normalizedDisplayName),
           password,
-          options: { data: { display_name: displayName } }
+          options: { data: { display_name: normalizedDisplayName } }
         })
         if (error) {
+          if (isDisplayNameConflictError(error.message)) {
+            return { error: DISPLAY_NAME_TAKEN_MESSAGE }
+          }
           return { error: error.message }
         }
-        const pendingEmailConfirmation = !data.session
-        return { error: null, pendingEmailConfirmation }
-      },
-      requestPasswordReset: async (email: string) => {
-        if (!supabase) {
-          return { error: 'Supabase is not configured' }
-        }
-        const trimmed = email.trim()
-        if (!trimmed) {
-          return { error: 'Enter your email address first.' }
-        }
-        const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-          redirectTo: getPasswordResetRedirectTo(),
-        })
-        return { error: error?.message ?? null }
+        return { error: null }
       },
       signOut: async () => {
         if (supabase) {
@@ -207,7 +213,6 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
           refreshProfile: async () => {},
           signIn: async () => ({ error: 'Supabase is not configured' }),
           signUp: async () => ({ error: 'Supabase is not configured' }),
-          requestPasswordReset: async () => ({ error: 'Supabase is not configured' }),
           signOut: async () => {}
         }}
       >
@@ -220,9 +225,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
 }
 
 export function useAuth(): AuthState & {
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signUp: (email: string, password: string, displayName: string) => Promise<SignUpResult>
-  requestPasswordReset: (email: string) => Promise<{ error: string | null }>
+  signIn: (displayName: string, password: string) => Promise<{ error: string | null }>
+  signUp: (displayName: string, password: string) => Promise<SignUpResult>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
 } {
