@@ -37,7 +37,8 @@ Browse the catalog, open script details, sign in to publish and edit scripts, an
 
 **Basically** I do not like Discord Forums. Every time the game updates and a script dev updates the script, you had to go to the forums, search for the correct thread and then scroll to see if the dev has updated the script. Now no more...
 **Umbrella script manager DB** is the desktop front-end for the Umbrella script ecosystem. It wraps the experience in an **Electron** shell, keeps the UI fast with **React**, and talks to **Supabase** for accounts, catalog data, and role-aware areas. **Dexie** backs the bits that belong on your machine, like catalog state that should survive restarts and feel instant. Built with cursor, claude and what I learned from 3 years of full stack development. 
-If you only care about using it: grab a **release**, install, and go. The sections below are for curiosity and contributors.
+
+If you only care about using it: grab a **release**, install, and go.
 
 ---
 
