@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useToast } from '../context/ToastContext'
 import { consumeAuthDeepLinkUrl } from '../lib/consumeAuthDeepLink'
@@ -26,7 +26,9 @@ async function applyDeepLinkUrl(
     onError(error)
     return
   }
-  if (linkType === 'recovery') {
+  // Some Supabase redirect variants omit `type` on custom-protocol callbacks.
+  // In this app, successful auth deep links are treated as recovery unless explicitly non-recovery.
+  if (linkType === 'recovery' || linkType === null) {
     onRecoveryLinkConsumed()
   }
 }
@@ -38,6 +40,9 @@ export function AuthRecoveryWatcher(): null {
   const navigate = useNavigate()
   const location = useLocation()
   const { addToast } = useToast()
+  // True while a recovery deep link is being processed. Used to intercept SIGNED_IN events
+  // fired by Supabase versions that don't emit PASSWORD_RECOVERY from exchangeCodeForSession.
+  const recoveryLinkProcessing = useRef(false)
 
   useEffect(() => {
     function goReset(): void {
@@ -49,11 +54,18 @@ export function AuthRecoveryWatcher(): null {
       addToast(message, 'error')
     }
 
+    function processDeepLink(url: string): void {
+      recoveryLinkProcessing.current = true
+      void applyDeepLinkUrl(url, onDeepLinkError, goReset).finally(() => {
+        recoveryLinkProcessing.current = false
+      })
+    }
+
     void window.umbrella.getPendingAuthDeepLink().then((url) => {
       if (!url || !supabase) {
         return
       }
-      void applyDeepLinkUrl(url, onDeepLinkError, goReset)
+      processDeepLink(url)
     })
 
     if (!supabase) {
@@ -68,14 +80,16 @@ export function AuthRecoveryWatcher(): null {
       })
     }
 
-    const offDeepLink = window.umbrella.onAuthDeepLink((url) => {
-      void applyDeepLinkUrl(url, onDeepLinkError, goReset)
-    })
+    const offDeepLink = window.umbrella.onAuthDeepLink(processDeepLink)
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
+        goReset()
+      } else if (event === 'SIGNED_IN' && recoveryLinkProcessing.current) {
+        // Some Supabase versions fire SIGNED_IN instead of PASSWORD_RECOVERY for recovery
+        // code exchanges. Intercept it here while we know a recovery link is in flight.
         goReset()
       }
     })

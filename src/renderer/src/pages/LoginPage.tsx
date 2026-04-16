@@ -6,6 +6,17 @@ import { AuthLuxInput } from '../components/auth/AuthLuxInput'
 import { APP_DISPLAY_NAME } from '../lib/appDisplayName'
 import { supabaseConfigured } from '../lib/supabase'
 
+function mapPasswordResetError(message: string): string {
+  const normalized = message.trim().toLowerCase()
+  if (
+    normalized.includes('email rate limit exceeded') ||
+    normalized.includes('over_email_send_rate_limit')
+  ) {
+    return 'Email is busy, try again in an hour.'
+  }
+  return message
+}
+
 export function LoginPage(): ReactElement {
   const { user, signIn, signUp, requestPasswordReset } = useAuth()
   const { addToast } = useToast()
@@ -51,7 +62,7 @@ export function LoginPage(): ReactElement {
     try {
       const res = await requestPasswordReset(email)
       if (res.error) {
-        setError(res.error)
+        setError(mapPasswordResetError(res.error))
         return
       }
       addToast('If that email is registered, we sent a reset link. Check your inbox.', 'success')
