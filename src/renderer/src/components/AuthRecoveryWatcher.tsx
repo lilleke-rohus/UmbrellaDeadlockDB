@@ -4,7 +4,9 @@ import { useToast } from '../context/ToastContext'
 import { consumeAuthDeepLinkUrl } from '../lib/consumeAuthDeepLink'
 import {
   clearPasswordRecoveryRequired,
+  isPasswordRecoveryEnforced,
   isPasswordRecoveryRequired,
+  markPasswordRecoveryEnforced,
   markPasswordRecoveryRequired,
 } from '../lib/passwordRecoveryRequirement'
 import { supabase } from '../lib/supabase'
@@ -92,6 +94,12 @@ export function AuthRecoveryWatcher(): null {
       return
     }
     if (location.pathname === '/reset-password') {
+      if (!isPasswordRecoveryEnforced()) {
+        markPasswordRecoveryEnforced()
+      }
+      return
+    }
+    if (!isPasswordRecoveryEnforced()) {
       return
     }
     clearPasswordRecoveryRequired()
