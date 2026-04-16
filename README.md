@@ -3,13 +3,13 @@
 <pre align="center">
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
-║                ·  Umbrella Deadlock DB  ·                 ║
+║                ·  Umbrella Script DB  ·                   ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 </pre>
 
-### A calm, dedicated window for Deadlock Lua scripts
-Browse the catalog, open script details, sign in as an author, and keep the app fresh with built-in updates—without living inside a browser tab.
+### A calm, dedicated window for Umbrella Lua scripts
+Browse the catalog, open script details, sign in to publish and edit scripts, and keep the app and scripts fresh.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/platform-Windows-1f6feb?style=for-the-badge&logo=windows&logoColor=white">
@@ -36,7 +36,7 @@ Browse the catalog, open script details, sign in as an author, and keep the app 
 ## Why this exists
 
 **Basically** I do not like Discord Forums. Every time the game updates and a script dev updates the script, you had to go to the forums, search for the correct thread and then scroll to see if the dev has updated the script. Now no more...
-**Umbrella Deadlock DB** is the desktop front-end for the Umbrella script ecosystem in Valve’s **Deadlock**. It wraps the experience in an **Electron** shell, keeps the UI fast with **React**, and talks to **Supabase** for accounts, catalog data, and role-aware areas. **Dexie** backs the bits that belong on your machine—like catalog state that should survive restarts and feel instant.
+**Umbrella script manager DB** is the desktop front-end for the Umbrella script ecosystem. It wraps the experience in an **Electron** shell, keeps the UI fast with **React**, and talks to **Supabase** for accounts, catalog data, and role-aware areas. **Dexie** backs the bits that belong on your machine, like catalog state that should survive restarts and feel instant. Built with cursor, claude and what I learned from 3 years of full stack development. 
 If you only care about using it: grab a **release**, install, and go. The sections below are for curiosity and contributors.
 
 ---
@@ -52,29 +52,9 @@ If you only care about using it: grab a **release**, install, and go. The sectio
 
 ---
 
-## Under the hood
-```mermaid
-flowchart LR
-  subgraph Desktop["Electron"]
-    R[React UI]
-    M[Main process]
-  end
-  R <-->|REST / Realtime| S[(Supabase)]
-  R <-->|IndexedDB| D[(Dexie)]
-  M --> U[Auto-updater]
-```
-
----
-
 ## Get it
 
 Prebuilt installers are attached to [**GitHub Releases**](https://github.com/lilleke-rohus/UmbrellaDeadlockDB). That is the path most people should use.
 
 ---
-<details>
-
-<summary><strong>If you want to build for yourself</strong></summary>
-
-Technically you can use this project for any similar installer/storage. Like for Umbrellas Dota2 scripts, or some OTC scripts idk.
-
-</details>
+ 
