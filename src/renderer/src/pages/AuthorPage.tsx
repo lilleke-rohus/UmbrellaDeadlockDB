@@ -207,7 +207,7 @@ function LuaScriptDropCard({
         <path d="M3 15h14" />
       </svg>
       <span className="lua-drop-zone-title">Drop .lua here</span>
-      <span className="lua-drop-zone-sub">Title, slug, version, and source update from the file when fields are empty (version also reads the Umbrella header).</span>
+      <span className="lua-drop-zone-sub">Title, slug, version, and source update from the file when fields are empty.</span>
       {filename.trim() ? (
         <span className="lua-drop-zone-file" title={filename}>
           {filename}
