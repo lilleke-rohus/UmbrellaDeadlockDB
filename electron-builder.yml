@@ -23,6 +23,7 @@ files:
   - package.json
 
 win:
+  artifactName: Umbrella-Deadlock-DB-Setup-${version}.${ext}
   target:
     - target: nsis
       arch: [x64]
