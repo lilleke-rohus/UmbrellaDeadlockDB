@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useGame } from '../context/GameContext'
 import type { CachedScriptMeta } from '../lib/catalogDb'
 import { getScriptInstallState, shouldUpdate } from '../lib/scriptNeedsUpdate'
 import { parseUmbrellaHeader } from '../lib/firstLine'
@@ -11,6 +12,7 @@ export function useInstallState(script: CachedScriptMeta | null): {
   manifestLoading: boolean
   reload: () => Promise<void>
 } {
+  const { activeGame } = useGame()
   const [state, setState] = useState<InstallButtonState>('unknown')
   const [manifestLoading, setManifestLoading] = useState(true)
 
@@ -22,8 +24,8 @@ export function useInstallState(script: CachedScriptMeta | null): {
     }
     setManifestLoading(true)
     try {
-      const m = await window.umbrella.getManifest()
-      const local = await window.umbrella.readLocalScript(script.filename)
+      const m = await window.umbrella.getManifest(activeGame)
+      const local = await window.umbrella.readLocalScript(script.filename, activeGame)
       if (!local.content) {
         setState('install')
         return
@@ -65,7 +67,7 @@ export function useInstallState(script: CachedScriptMeta | null): {
     } finally {
       setManifestLoading(false)
     }
-  }, [script])
+  }, [script, activeGame])
 
   useEffect(() => {
     void reload()

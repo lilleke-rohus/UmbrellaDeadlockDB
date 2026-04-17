@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { GameProvider } from './context/GameContext'
 import { ToastProvider } from './context/ToastContext'
 import { Layout } from './components/Layout'
 import { UpdateNotifier } from './components/UpdateNotifier'
@@ -33,6 +34,7 @@ export default function App(): React.ReactElement {
   return (
     <ToastProvider>
       <UpdateNotifier />
+      <GameProvider>
       <AuthProvider>
         <AuthRecoveryWatcher />
         <Routes>
@@ -58,6 +60,7 @@ export default function App(): React.ReactElement {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
+      </GameProvider>
     </ToastProvider>
   )
 }

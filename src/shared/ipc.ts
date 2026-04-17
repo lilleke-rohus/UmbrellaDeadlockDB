@@ -6,6 +6,7 @@ export const IPC_CHANNELS = {
   getSettings: 'umbrella:get-settings',
   updateSettings: 'umbrella:update-settings',
   setScriptsRoot: 'umbrella:set-scripts-root',
+  setDota2ScriptsRoot: 'umbrella:set-dota2-scripts-root',
   pickScriptsDirectory: 'umbrella:pick-scripts-directory',
   pickLuaScriptFile: 'umbrella:pick-lua-script-file',
   listLocalScripts: 'umbrella:list-local-scripts',
@@ -33,9 +34,12 @@ export const IPC_CHANNELS = {
   getPendingAuthDeepLink: 'umbrella:get-pending-auth-deep-link',
 } as const
 
+export type ActiveGame = 'deadlock' | 'dota2'
+
 export type AppSettings = {
   scriptsRootPath: string | null
   autoUpdateScripts?: boolean
+  dota2ScriptsRootPath: string | null
 }
 
 export type ManifestEntry = {
@@ -66,15 +70,16 @@ export type IpcApi = {
   getSettings: () => Promise<AppSettings>
   updateSettings: (patch: Partial<AppSettings>) => Promise<{ ok: boolean; error?: string }>
   setScriptsRoot: (rootPath: string) => Promise<{ ok: boolean; error?: string }>
+  setDota2ScriptsRoot: (rootPath: string) => Promise<{ ok: boolean; error?: string }>
   pickScriptsDirectory: () => Promise<string | null>
   pickLuaScriptFile: () => Promise<PickLuaScriptFileResult | null>
-  listLocalScripts: () => Promise<{ names: string[]; error?: string }>
-  readLocalScript: (filename: string) => Promise<{ content: string | null; error?: string }>
-  writeScript: (filename: string, contents: string) => Promise<{ ok: boolean; error?: string }>
-  deleteScript: (filename: string) => Promise<{ ok: boolean; error?: string }>
-  getManifest: () => Promise<InstallManifest>
-  setManifestEntry: (key: string, entry: ManifestEntry | null) => Promise<{ ok: boolean; error?: string }>
-  revealInExplorer: (filename?: string) => Promise<{ ok: boolean; error?: string }>
+  listLocalScripts: (game?: ActiveGame) => Promise<{ names: string[]; error?: string }>
+  readLocalScript: (filename: string, game?: ActiveGame) => Promise<{ content: string | null; error?: string }>
+  writeScript: (filename: string, contents: string, game?: ActiveGame) => Promise<{ ok: boolean; error?: string }>
+  deleteScript: (filename: string, game?: ActiveGame) => Promise<{ ok: boolean; error?: string }>
+  getManifest: (game?: ActiveGame) => Promise<InstallManifest>
+  setManifestEntry: (key: string, entry: ManifestEntry | null, game?: ActiveGame) => Promise<{ ok: boolean; error?: string }>
+  revealInExplorer: (filename?: string, game?: ActiveGame) => Promise<{ ok: boolean; error?: string }>
   windowMinimize: () => Promise<void>
   windowMaximize: () => Promise<void>
   windowClose: () => Promise<void>

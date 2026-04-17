@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useGame } from '../context/GameContext'
 import { parseUmbrellaHeader, stripFirstLine } from '../lib/firstLine'
 import { dedupeTags, SCRIPT_TAG_PRESETS, slugifyFilename } from '../lib/tags'
 import { supabase } from '../lib/supabase'
 import type { ScriptRow, ScriptStatus } from '../../../shared/supabase.types'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconScriptTile } from '../components/NavIcons'
+import type { ActiveGame } from '../../../shared/ipc'
 import { loadCachedCatalog } from '../lib/catalogDb'
 import { shouldUpdate } from '../lib/scriptNeedsUpdate'
 import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
@@ -255,15 +257,16 @@ function createLocalManifestLikeEntry(
 
 async function loadLocalLuaFiles(
   onProgress?: (progress: { done: number; total: number }) => void,
+  game: ActiveGame = 'deadlock',
 ): Promise<{ files: LocalLuaScript[]; error: string | null }> {
-  const result = await scanLocalLuaScriptsWithHashes(onProgress)
+  const result = await scanLocalLuaScriptsWithHashes(onProgress, game)
   return { files: result.scripts, error: result.error }
 }
 
-async function loadInstalledScripts(localFiles: LocalLuaScript[]): Promise<InstalledEntry[]> {
+async function loadInstalledScripts(localFiles: LocalLuaScript[], game: ActiveGame = 'deadlock'): Promise<InstalledEntry[]> {
   const [manifest, catalog] = await Promise.all([
-    window.umbrella.getManifest(),
-    loadCachedCatalog(),
+    window.umbrella.getManifest(game),
+    loadCachedCatalog(game),
   ])
   const localFileByNormalizedFilename = new Map(localFiles.map((file) => [file.normalizedFilename, file]))
   const catalogById = new Map(catalog.map((s) => [s.id, s]))
@@ -417,6 +420,7 @@ function InstalledLibraryView({
 } = {}): React.ReactElement {
   const { librarySearch, libraryView } = useOutletContext<VaultOutletContext>()
   const { addToast } = useToast()
+  const { activeGame } = useGame()
   const [entries, setEntries] = useState<InstalledEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [scanError, setScanError] = useState<string | null>(null)
@@ -426,17 +430,17 @@ function InstalledLibraryView({
   const reloadEntries = useCallback(async () => {
     setLoading(true)
     try {
-      const localScan = await loadLocalLuaFiles()
+      const localScan = await loadLocalLuaFiles(undefined, activeGame)
       setScanError(localScan.error)
       if (localScan.error) {
         setEntries([])
         return
       }
-      setEntries(await loadInstalledScripts(localScan.files))
+      setEntries(await loadInstalledScripts(localScan.files, activeGame))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeGame])
 
   const checkHashUpdates = useCallback(async () => {
     if (checkingHashes) return
@@ -444,12 +448,12 @@ function InstalledLibraryView({
     setHashProgress({ done: 0, total: 0 })
     addToast('Checking local script hashes…')
     try {
-      const localScan = await loadLocalLuaFiles((progress) => setHashProgress(progress))
+      const localScan = await loadLocalLuaFiles((progress) => setHashProgress(progress), activeGame)
       if (localScan.error) {
         addToast(localScan.error, 'error')
         return
       }
-      const catalogRows = await loadCachedCatalog()
+      const catalogRows = await loadCachedCatalog(activeGame)
       const summary = summarizeHashCheckAgainstCatalog(localScan.files, catalogRows)
       addToast(
         `Hash check: ${summary.current} current, ${summary.outdated} need update, ${summary.missingHash} missing hash, ${summary.unknown} not in store.`,
@@ -459,7 +463,7 @@ function InstalledLibraryView({
     } finally {
       setCheckingHashes(false)
     }
-  }, [addToast, checkingHashes, reloadEntries])
+  }, [activeGame, addToast, checkingHashes, reloadEntries])
 
   useEffect(() => {
     void reloadEntries()
@@ -624,8 +628,31 @@ function InstalledLibraryView({
 }
 
 export function AuthorPage(): React.ReactElement {
+  const { setAuthorStudioActive } = useOutletContext<VaultOutletContext>()
   const { user, canOpenAuthorStudio, canOpenAuthorStudioLoading, loading: authLoading } = useAuth()
   const [authorView, setAuthorView] = useState<'installed' | 'studio'>('installed')
+
+  useEffect(() => {
+    if (authLoading || canOpenAuthorStudioLoading) {
+      setAuthorStudioActive(false)
+      return
+    }
+    if (!user || !canOpenAuthorStudio) {
+      setAuthorStudioActive(false)
+      return
+    }
+    setAuthorStudioActive(authorView === 'studio')
+    return () => {
+      setAuthorStudioActive(false)
+    }
+  }, [
+    authLoading,
+    canOpenAuthorStudio,
+    canOpenAuthorStudioLoading,
+    authorView,
+    setAuthorStudioActive,
+    user,
+  ])
 
   if (authLoading || canOpenAuthorStudioLoading) {
     return <SkeletonLibrary count={3} />
@@ -655,9 +682,23 @@ export function AuthorPage(): React.ReactElement {
   )
 }
 
+const SCRIPT_TABLE: Record<ActiveGame, string> = {
+  deadlock: 'scripts',
+  dota2: 'dota2_scripts',
+}
+const COAUTHOR_TABLE: Record<ActiveGame, string> = {
+  deadlock: 'script_coauthors',
+  dota2: 'dota2_script_coauthors',
+}
+const CHANGELOG_TABLE: Record<ActiveGame, string> = {
+  deadlock: 'script_changelog',
+  dota2: 'dota2_script_changelog',
+}
+
 function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () => void } = {}): React.ReactElement {
   const { user, role } = useAuth()
   const { addToast } = useToast()
+  const { activeGame } = useGame()
   const canCreateScripts = ['author', 'moderator', 'admin'].includes(role)
   const { librarySearch, libraryView, libraryNewDraft, setLibraryNewDraft } =
     useOutletContext<VaultOutletContext>()
@@ -674,7 +715,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
   const loadMine = useCallback(async () => {
     if (!supabase || !user) return
     const { data: authored, error: e1 } = await supabase
-      .from('scripts')
+      .from(SCRIPT_TABLE[activeGame])
       .select('*')
       .eq('author_id', user.id)
       .order('updated_at', { ascending: false })
@@ -686,7 +727,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
     const list: ScriptRow[] = [...((authored as ScriptRow[]) ?? [])]
     const byId = new Map(list.map((r) => [r.id, r]))
     const { data: coRows, error: e2 } = await supabase
-      .from('script_coauthors')
+      .from(COAUTHOR_TABLE[activeGame])
       .select('script_id')
       .eq('profile_id', user.id)
     if (e2) {
@@ -696,7 +737,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
     }
     const coIds = [...new Set((coRows ?? []).map((r: { script_id: string }) => r.script_id))]
     if (coIds.length) {
-      const { data: coScripts, error: e3 } = await supabase.from('scripts').select('*').in('id', coIds)
+      const { data: coScripts, error: e3 } = await supabase.from(SCRIPT_TABLE[activeGame]).select('*').in('id', coIds)
       if (e3) {
         addToast(userFacingMessage(e3), 'error')
         setMineLoading(false)
@@ -709,7 +750,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
     list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
     setMine(list)
     setMineLoading(false)
-  }, [user, addToast])
+  }, [user, addToast, activeGame])
 
   useEffect(() => { void loadMine() }, [loadMine])
 
@@ -749,7 +790,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
       })),
     [filtered],
   )
-  const catalogUpdateIds = useScriptUpdateHighlightSet(libraryHighlightRefs)
+  const catalogUpdateIds = useScriptUpdateHighlightSet(libraryHighlightRefs, activeGame)
 
   function openEdit(r: ScriptRow): void {
     setForm({
@@ -822,7 +863,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
       const content_hash = await computeLuaContentHash(lua_source)
       const tags = dedupeTags(form.tags)
       if (form.id) {
-        const { error, data: updated } = await supabase.from('scripts').update({
+        const { error, data: updated } = await supabase.from(SCRIPT_TABLE[activeGame]).update({
           slug: form.slug.trim(), title: form.title.trim(), filename: form.filename.trim(),
           status: targetStatus,
           content_version: contentVersion,
@@ -839,7 +880,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
         const newVersion = updatedRow.content_version
         setForm((f) => ({ ...f, status: updatedRow.status }))
         if (form.changelog.trim()) {
-          const { error: chErr } = await supabase.from('script_changelog').upsert(
+          const { error: chErr } = await supabase.from(CHANGELOG_TABLE[activeGame]).upsert(
             { script_id: form.id, version: newVersion, body: form.changelog.trim() },
             { onConflict: 'script_id,version' }
           )
@@ -849,7 +890,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
           }
         }
       } else {
-        const { data, error } = await supabase.from('scripts').insert({
+        const { data, error } = await supabase.from(SCRIPT_TABLE[activeGame]).insert({
           slug: form.slug.trim(), title: form.title.trim(), filename: form.filename.trim(),
           content_version: contentVersion,
           content_hash,
@@ -879,7 +920,7 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
 
   async function deleteDraft(id: string): Promise<void> {
     if (!supabase || !confirm('Delete this draft?')) return
-    const { error } = await supabase.from('scripts').delete().eq('id', id)
+    const { error } = await supabase.from(SCRIPT_TABLE[activeGame]).delete().eq('id', id)
     if (error) {
       addToast(userFacingMessage(error), 'error')
       return

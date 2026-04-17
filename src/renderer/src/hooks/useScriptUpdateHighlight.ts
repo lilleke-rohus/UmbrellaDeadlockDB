@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ActiveGame, InstallManifest } from '../../../shared/ipc'
 import type { CachedScriptMeta } from '../lib/catalogDb'
 import { getScriptInstallState } from '../lib/scriptNeedsUpdate'
 import { supabase } from '../lib/supabase'
-import type { InstallManifest } from '../../../shared/ipc'
 
 export type ScriptUpdateRef = Pick<CachedScriptMeta, 'id' | 'filename' | 'content_version' | 'updated_at' | 'content_hash'>
 
-async function mergeRemoteScriptMeta(scripts: ScriptUpdateRef[]): Promise<ScriptUpdateRef[]> {
+const SCRIPT_TABLE: Record<ActiveGame, string> = {
+  deadlock: 'scripts',
+  dota2: 'dota2_scripts',
+}
+
+async function mergeRemoteScriptMeta(
+  scripts: ScriptUpdateRef[],
+  game: ActiveGame,
+): Promise<ScriptUpdateRef[]> {
   if (!supabase || scripts.length === 0) return scripts
+  const table = SCRIPT_TABLE[game]
   const ids = [...new Set(scripts.map((s) => s.id))]
   const { data, error } = await supabase
-    .from('scripts')
+    .from(table)
     .select('id, content_version, content_hash, updated_at')
     .in('id', ids)
   if (error || !data?.length) return scripts
@@ -24,8 +33,12 @@ async function mergeRemoteScriptMeta(scripts: ScriptUpdateRef[]): Promise<Script
 }
 
 /** Same rules as the script detail Install/Update control (manifest-based install state). */
-async function computeUpdateHighlightIds(scripts: ScriptUpdateRef[], manifest: InstallManifest): Promise<Set<string>> {
-  const effective = await mergeRemoteScriptMeta(scripts)
+async function computeUpdateHighlightIds(
+  scripts: ScriptUpdateRef[],
+  manifest: InstallManifest,
+  game: ActiveGame,
+): Promise<Set<string>> {
+  const effective = await mergeRemoteScriptMeta(scripts, game)
   const next = new Set<string>()
 
   for (const s of effective) {
@@ -38,7 +51,10 @@ async function computeUpdateHighlightIds(scripts: ScriptUpdateRef[], manifest: I
 }
 
 /** Script ids where an install/update is available (aligned with `useInstallState` on the detail page). */
-export function useScriptUpdateHighlightSet(scripts: ScriptUpdateRef[]): Set<string> {
+export function useScriptUpdateHighlightSet(
+  scripts: ScriptUpdateRef[],
+  game: ActiveGame = 'deadlock',
+): Set<string> {
   const [ids, setIds] = useState<Set<string>>(() => new Set())
   const scriptsRef = useRef(scripts)
   scriptsRef.current = scripts
@@ -52,15 +68,15 @@ export function useScriptUpdateHighlightSet(scripts: ScriptUpdateRef[]): Set<str
     let cancelled = false
     void (async () => {
       const list = scriptsRef.current
-      const manifest = await window.umbrella.getManifest()
+      const manifest = await window.umbrella.getManifest(game)
       if (cancelled) return
-      const next = await computeUpdateHighlightIds(list, manifest)
+      const next = await computeUpdateHighlightIds(list, manifest, game)
       if (!cancelled) setIds(next)
     })()
     return () => {
       cancelled = true
     }
-  }, [fingerprint])
+  }, [fingerprint, game])
 
   return ids
 }

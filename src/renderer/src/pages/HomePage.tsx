@@ -4,6 +4,7 @@ import { useCatalog } from '../hooks/useCatalog'
 import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconRowScript, IconScriptTile } from '../components/NavIcons'
+import { useGame } from '../context/GameContext'
 import { useToast } from '../context/ToastContext'
 import { scanLocalLuaScriptsWithHashes, summarizeHashCheckAgainstCatalog } from '../lib/scriptHash'
 
@@ -115,7 +116,8 @@ function formatUpdated(iso: string): string {
 
 export function HomePage(): React.ReactElement {
   const { storeSearch, storeView } = useOutletContext<VaultOutletContext>()
-  const { items, loading, error, online, refresh } = useCatalog()
+  const { activeGame } = useGame()
+  const { items, loading, error, online, refresh } = useCatalog(activeGame)
   const { addToast } = useToast()
   const [cat, setCat] = useState<string | null>(null)
   const [sort, setSort] = useState<SortMode>('newest')
@@ -130,7 +132,7 @@ export function HomePage(): React.ReactElement {
 
   const sorted = useMemo(() => sortCatalog(filtered, sort), [filtered, sort])
 
-  const catalogUpdateIds = useScriptUpdateHighlightSet(sorted)
+  const catalogUpdateIds = useScriptUpdateHighlightSet(sorted, activeGame)
 
   const hasFilters = Boolean(cat) || query.trim().length > 0
   const summary = buildSummary(items.length, filtered.length, hasFilters)
@@ -143,7 +145,7 @@ export function HomePage(): React.ReactElement {
     try {
       const localScan = await scanLocalLuaScriptsWithHashes((progress) => {
         setHashProgress(progress)
-      })
+      }, activeGame)
       if (localScan.error) {
         addToast(localScan.error, 'error')
         return

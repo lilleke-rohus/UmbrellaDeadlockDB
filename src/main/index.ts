@@ -5,7 +5,14 @@ import electronUpdater from 'electron-updater'
 import { APP_AUTH_PROTOCOL_SCHEME } from '../shared/authDeepLink'
 import { IPC_CHANNELS, type PickLuaScriptFileResult } from '../shared/ipc'
 import { resolveUnderRoot } from './paths'
-import { readManifest, readSettings, upsertManifestEntry, writeSettings } from './store'
+import {
+  readDota2Manifest,
+  readManifest,
+  readSettings,
+  upsertDota2ManifestEntry,
+  upsertManifestEntry,
+  writeSettings,
+} from './store'
 import type { ManifestEntry } from '../shared/ipc'
 
 const { autoUpdater } = electronUpdater
@@ -242,7 +249,21 @@ app.whenReady().then(() => {
     if (!ensured.ok) {
       return ensured
     }
-    writeSettings({ scriptsRootPath: rootPath.trim() })
+    const current = readSettings()
+    writeSettings({ ...current, scriptsRootPath: rootPath.trim() })
+    return { ok: true }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.setDota2ScriptsRoot, (_e, rootPath: string) => {
+    if (typeof rootPath !== 'string' || !rootPath.trim()) {
+      return { ok: false, error: 'Invalid path' }
+    }
+    const ensured = ensureScriptsRoot(rootPath.trim())
+    if (!ensured.ok) {
+      return ensured
+    }
+    const current = readSettings()
+    writeSettings({ ...current, dota2ScriptsRootPath: rootPath.trim() })
     return { ok: true }
   })
 
@@ -278,13 +299,14 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.listLocalScripts, () => {
-    const { scriptsRootPath } = readSettings()
-    if (!scriptsRootPath) {
+  ipcMain.handle(IPC_CHANNELS.listLocalScripts, (_e, game = 'deadlock') => {
+    const settings = readSettings()
+    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    if (!root) {
       return { names: [] as string[], error: 'Scripts folder not configured' }
     }
     try {
-      const names = readdirSync(scriptsRootPath).filter((n) => n.toLowerCase().endsWith('.lua'))
+      const names = readdirSync(root).filter((n) => n.toLowerCase().endsWith('.lua'))
       return { names }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -292,15 +314,16 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.readLocalScript, (_e, filename: string) => {
-    const { scriptsRootPath } = readSettings()
-    if (!scriptsRootPath) {
+  ipcMain.handle(IPC_CHANNELS.readLocalScript, (_e, filename: string, game = 'deadlock') => {
+    const settings = readSettings()
+    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    if (!root) {
       return { content: null, error: 'Scripts folder not configured' }
     }
     if (typeof filename !== 'string') {
       return { content: null, error: 'Invalid filename' }
     }
-    const full = resolveUnderRoot(scriptsRootPath, filename)
+    const full = resolveUnderRoot(root, filename)
     if (!full) {
       return { content: null, error: 'Path not allowed' }
     }
@@ -316,9 +339,10 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.writeScript, (_e, filename: string, contents: string) => {
-    const { scriptsRootPath } = readSettings()
-    if (!scriptsRootPath) {
+  ipcMain.handle(IPC_CHANNELS.writeScript, (_e, filename: string, contents: string, game = 'deadlock') => {
+    const settings = readSettings()
+    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    if (!root) {
       return { ok: false, error: 'Scripts folder not configured' }
     }
     if (typeof filename !== 'string' || typeof contents !== 'string') {
@@ -328,7 +352,7 @@ app.whenReady().then(() => {
     if (base !== filename || !filename.toLowerCase().endsWith('.lua')) {
       return { ok: false, error: 'Filename must be a bare .lua name' }
     }
-    const full = resolveUnderRoot(scriptsRootPath, filename)
+    const full = resolveUnderRoot(root, filename)
     if (!full) {
       return { ok: false, error: 'Path not allowed' }
     }
@@ -345,15 +369,16 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.deleteScript, (_e, filename: string) => {
-    const { scriptsRootPath } = readSettings()
-    if (!scriptsRootPath) {
+  ipcMain.handle(IPC_CHANNELS.deleteScript, (_e, filename: string, game = 'deadlock') => {
+    const settings = readSettings()
+    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    if (!root) {
       return { ok: false, error: 'Scripts folder not configured' }
     }
     if (typeof filename !== 'string') {
       return { ok: false, error: 'Invalid filename' }
     }
-    const full = resolveUnderRoot(scriptsRootPath, filename)
+    const full = resolveUnderRoot(root, filename)
     if (!full) {
       return { ok: false, error: 'Path not allowed' }
     }
@@ -368,14 +393,20 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.getManifest, () => readManifest())
+  ipcMain.handle(IPC_CHANNELS.getManifest, (_e, game = 'deadlock') =>
+    game === 'dota2' ? readDota2Manifest() : readManifest()
+  )
 
-  ipcMain.handle(IPC_CHANNELS.setManifestEntry, (_e, key: string, entry: ManifestEntry | null) => {
+  ipcMain.handle(IPC_CHANNELS.setManifestEntry, (_e, key: string, entry: ManifestEntry | null, game = 'deadlock') => {
     if (typeof key !== 'string' || !key) {
       return { ok: false, error: 'Invalid key' }
     }
     try {
-      upsertManifestEntry(key, entry)
+      if (game === 'dota2') {
+        upsertDota2ManifestEntry(key, entry)
+      } else {
+        upsertManifestEntry(key, entry)
+      }
       return { ok: true }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -383,20 +414,21 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.revealInExplorer, (_e, filename?: string) => {
-    const { scriptsRootPath } = readSettings()
-    if (!scriptsRootPath) {
+  ipcMain.handle(IPC_CHANNELS.revealInExplorer, (_e, filename?: string, game = 'deadlock') => {
+    const settings = readSettings()
+    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    if (!root) {
       return { ok: false, error: 'Scripts folder not configured' }
     }
     try {
       if (filename && typeof filename === 'string') {
-        const full = resolveUnderRoot(scriptsRootPath, filename)
+        const full = resolveUnderRoot(root, filename)
         if (!full) {
           return { ok: false, error: 'Path not allowed' }
         }
         void shell.showItemInFolder(full)
       } else {
-        void shell.openPath(scriptsRootPath)
+        void shell.openPath(root)
       }
       return { ok: true }
     } catch (e) {

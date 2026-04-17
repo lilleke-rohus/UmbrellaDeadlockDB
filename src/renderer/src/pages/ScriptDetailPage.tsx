@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useGame } from '../context/GameContext'
 import { supabase } from '../lib/supabase'
 import type { ScriptRow } from '../../../shared/supabase.types'
 import { useInstallState } from '../hooks/useInstallState'
@@ -8,6 +9,11 @@ import type { CachedScriptMeta } from '../lib/catalogDb'
 import { useToast } from '../context/ToastContext'
 import { userFacingMessage } from '../lib/userFacingError'
 import { IconScriptTile } from '../components/NavIcons'
+
+const SCRIPT_TABLE = { deadlock: 'scripts', dota2: 'dota2_scripts' } as const
+const CHANGELOG_TABLE = { deadlock: 'script_changelog', dota2: 'dota2_script_changelog' } as const
+const INSTALL_COUNT_RPC = { deadlock: 'increment_install_count', dota2: 'increment_dota2_install_count' } as const
+const SCRIPTS_ROOT_KEY = { deadlock: 'scriptsRootPath', dota2: 'dota2ScriptsRootPath' } as const
 
 type ChangelogEntry = { id: string; version: number; body: string; created_at: string }
 
@@ -53,6 +59,7 @@ export function ScriptDetailPage(): React.ReactElement {
   const { slug } = useParams()
   const { user } = useAuth()
   const { addToast } = useToast()
+  const { activeGame } = useGame()
   const [row, setRow] = useState<ScriptRow | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -104,7 +111,7 @@ export function ScriptDetailPage(): React.ReactElement {
     setChangelogHistory([])
     void (async () => {
       const { data, error } = await supabase
-        .from('scripts')
+        .from(SCRIPT_TABLE[activeGame])
         .select(
           'id, slug, title, description, category, tags, filename, status, content_version, content_hash, updated_at, published_at, author_id, changelog, install_count'
         )
@@ -121,7 +128,7 @@ export function ScriptDetailPage(): React.ReactElement {
       setLoading(false)
       if (supabase && data) {
         void supabase
-          .from('script_changelog')
+          .from(CHANGELOG_TABLE[activeGame])
           .select('id, version, body, created_at')
           .eq('script_id', (data as { id: string }).id)
           .order('version', { ascending: false })
@@ -131,12 +138,12 @@ export function ScriptDetailPage(): React.ReactElement {
       }
     })()
     return () => { cancelled = true }
-  }, [slug])
+  }, [slug, activeGame])
 
   async function toggleSource(): Promise<void> {
     if (showSource) { setShowSource(false); return }
     if (!luaSource && supabase && row) {
-      const { data } = await supabase.from('scripts').select('lua_source').eq('id', row.id).single()
+      const { data } = await supabase.from(SCRIPT_TABLE[activeGame]).select('lua_source').eq('id', row.id).single()
       setLuaSource((data as { lua_source: string | null } | null)?.lua_source ?? null)
     }
     setShowSource(true)
@@ -147,7 +154,7 @@ export function ScriptDetailPage(): React.ReactElement {
     setBusy(true)
     try {
       const settings = await window.umbrella.getSettings()
-      if (!settings.scriptsRootPath) {
+      if (!settings[SCRIPTS_ROOT_KEY[activeGame]]) {
         addToast('Choose a scripts folder in Settings first.', 'error')
         return
       }
@@ -157,7 +164,7 @@ export function ScriptDetailPage(): React.ReactElement {
           addToast('Could not fetch script source.', 'error')
           return
         }
-        const { data: src } = await supabase.from('scripts').select('lua_source').eq('id', row.id).single()
+        const { data: src } = await supabase.from(SCRIPT_TABLE[activeGame]).select('lua_source').eq('id', row.id).single()
         if (!src || !(src as { lua_source: string | null }).lua_source) {
           addToast('Could not fetch script source.', 'error')
           return
@@ -165,7 +172,7 @@ export function ScriptDetailPage(): React.ReactElement {
         source = (src as { lua_source: string }).lua_source
         setLuaSource(source)
       }
-      const w = await window.umbrella.writeScript(row.filename, source)
+      const w = await window.umbrella.writeScript(row.filename, source, activeGame)
       if (!w.ok) {
         addToast(w.error ?? 'Write failed', 'error')
         return
@@ -177,13 +184,13 @@ export function ScriptDetailPage(): React.ReactElement {
         contentHash: row.content_hash,
         updatedAt: row.updated_at,
         installedAt: new Date().toISOString()
-      })
+      }, activeGame)
       if (!inst.ok) {
         addToast(inst.error ?? 'Manifest update failed', 'error')
         return
       }
       if (installState === 'install' && supabase && user) {
-        await supabase.rpc('increment_install_count', { p_script_id: row.id })
+        await supabase.rpc(INSTALL_COUNT_RPC[activeGame], { p_script_id: row.id })
       }
       addToast('Saved to your scripts folder.', 'success')
       await reload()
@@ -196,8 +203,8 @@ export function ScriptDetailPage(): React.ReactElement {
     if (!row) return
     setBusy(true)
     try {
-      await window.umbrella.deleteScript(row.filename)
-      await window.umbrella.setManifestEntry(row.id, null)
+      await window.umbrella.deleteScript(row.filename, activeGame)
+      await window.umbrella.setManifestEntry(row.id, null, activeGame)
       addToast('Script uninstalled.', 'info')
       await reload()
     } finally {

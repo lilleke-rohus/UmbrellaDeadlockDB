@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import type { ActiveGame } from '../../../shared/ipc'
 
 export type CachedScriptMeta = {
   id: string
@@ -21,44 +22,49 @@ export type CachedScriptMeta = {
 
 type MetaRow = { id: string; lastSyncedAt: string }
 
-export class CatalogDB extends Dexie {
+class CatalogDB extends Dexie {
   scripts!: Table<CachedScriptMeta, string>
   syncMeta!: Table<MetaRow, string>
 
-  constructor() {
-    super('umbrella-deadlock-db')
+  constructor(dbName: string) {
+    super(dbName)
     this.version(1).stores({
       scripts: 'id, slug, title, category, updated_at',
-      syncMeta: 'id'
+      syncMeta: 'id',
     })
-    // Version 2: adds multi-entry tags index
     this.version(2).stores({
       scripts: 'id, slug, title, category, updated_at, *tags',
-      syncMeta: 'id'
+      syncMeta: 'id',
     })
   }
 }
 
-export const catalogDb = new CatalogDB()
+const deadlockDb = new CatalogDB('umbrella-deadlock-db')
+const dota2Db = new CatalogDB('umbrella-dota2-db')
 
-export async function loadCachedCatalog(): Promise<CachedScriptMeta[]> {
-  return catalogDb.scripts.orderBy('updated_at').reverse().toArray()
+function dbFor(game: ActiveGame): CatalogDB {
+  return game === 'dota2' ? dota2Db : deadlockDb
 }
 
-export async function mergeCatalogFromRemote(rows: CachedScriptMeta[]): Promise<void> {
+export async function loadCachedCatalog(game: ActiveGame = 'deadlock'): Promise<CachedScriptMeta[]> {
+  return dbFor(game).scripts.orderBy('updated_at').reverse().toArray()
+}
+
+export async function mergeCatalogFromRemote(rows: CachedScriptMeta[], game: ActiveGame = 'deadlock'): Promise<void> {
+  const db = dbFor(game)
   const incomingIds = new Set(rows.map((r) => r.id))
-  await catalogDb.transaction('rw', catalogDb.scripts, catalogDb.syncMeta, async () => {
-    const existingIds = await catalogDb.scripts.toCollection().primaryKeys()
+  await db.transaction('rw', db.scripts, db.syncMeta, async () => {
+    const existingIds = await db.scripts.toCollection().primaryKeys()
     const toDelete = (existingIds as string[]).filter((id) => !incomingIds.has(id))
     if (toDelete.length) {
-      await catalogDb.scripts.bulkDelete(toDelete)
+      await db.scripts.bulkDelete(toDelete)
     }
-    await catalogDb.scripts.bulkPut(rows)
-    await catalogDb.syncMeta.put({ id: 'catalog', lastSyncedAt: new Date().toISOString() })
+    await db.scripts.bulkPut(rows)
+    await db.syncMeta.put({ id: 'catalog', lastSyncedAt: new Date().toISOString() })
   })
 }
 
-export async function getLastSyncedAt(): Promise<string | null> {
-  const row = await catalogDb.syncMeta.get('catalog')
+export async function getLastSyncedAt(game: ActiveGame = 'deadlock'): Promise<string | null> {
+  const row = await dbFor(game).syncMeta.get('catalog')
   return row?.lastSyncedAt ?? null
 }

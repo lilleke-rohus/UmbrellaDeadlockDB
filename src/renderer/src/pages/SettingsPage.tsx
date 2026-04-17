@@ -264,6 +264,9 @@ function SecuritySection(props: SecuritySectionProps): React.ReactElement {
 }
 
 type ScriptsFolderSectionProps = {
+  title: string
+  label: string
+  defaultPath: string
   root: string
   onRootChange: (value: string) => void
   onPickFolder: () => void
@@ -271,16 +274,16 @@ type ScriptsFolderSectionProps = {
 }
 
 function ScriptsFolderSection(props: ScriptsFolderSectionProps): React.ReactElement {
-  const { root, onRootChange, onPickFolder, onSaveRoot } = props
+  const { title, label, defaultPath, root, onRootChange, onPickFolder, onSaveRoot } = props
 
   return (
     <section className="settings-section">
-      <div className="settings-section-title">Scripts folder</div>
+      <div className="settings-section-title">{title}</div>
       <div className="setting-row">
         <div>
-          <div className="setting-label">Scripts folder path</div>
+          <div className="setting-label">{label}</div>
           <div className="setting-desc">
-            Installed scripts are written here. Default on Windows: <code>C:\Umbrella\deadlock_scripts</code>
+            Installed scripts are written here. Default on Windows: <code>{defaultPath}</code>
           </div>
         </div>
         <button
@@ -294,12 +297,11 @@ function ScriptsFolderSection(props: ScriptsFolderSectionProps): React.ReactElem
       </div>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 0' }}>
         <input
-          id="settings-scripts-root"
           className="field-input grow"
           style={{ flex: '1 1 200px', minWidth: 0 }}
           value={root}
           onChange={(e) => onRootChange(e.target.value)}
-          placeholder="e.g. C:\Umbrella\deadlock_scripts"
+          placeholder={`e.g. ${defaultPath}`}
           autoComplete="off"
           spellCheck={false}
         />
@@ -418,6 +420,7 @@ export function SettingsPage(): React.ReactElement {
   const { user, profile, role, loading: authLoading } = useAuth()
   const { addToast } = useToast()
   const [root, setRoot] = useState('')
+  const [dota2Root, setDota2Root] = useState('')
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [accountBusy, setAccountBusy] = useState(false)
   const [accountError, setAccountError] = useState<string | null>(null)
@@ -436,6 +439,7 @@ export function SettingsPage(): React.ReactElement {
   useEffect(() => {
     void window.umbrella.getSettings().then((s) => {
       setRoot(s.scriptsRootPath ?? '')
+      setDota2Root(s.dota2ScriptsRootPath ?? '')
       setAutoUpdate(s.autoUpdateScripts ?? false)
     })
     void getLastSyncedAt().then(setLastSync)
@@ -454,7 +458,23 @@ export function SettingsPage(): React.ReactElement {
       addToast(res.error ?? 'Failed to save path', 'error')
       return
     }
-    addToast('Saved scripts folder.', 'success')
+    addToast('Saved Deadlock scripts folder.', 'success')
+  }
+
+  async function pickDota2Folder(): Promise<void> {
+    const picked = await window.umbrella.pickScriptsDirectory()
+    if (picked) {
+      setDota2Root(picked)
+    }
+  }
+
+  async function saveDota2Root(): Promise<void> {
+    const res = await window.umbrella.setDota2ScriptsRoot(dota2Root.trim())
+    if (!res.ok) {
+      addToast(res.error ?? 'Failed to save path', 'error')
+      return
+    }
+    addToast('Saved Dota 2 scripts folder.', 'success')
   }
 
   async function enableAuthor(): Promise<void> {
@@ -546,10 +566,22 @@ export function SettingsPage(): React.ReactElement {
         />
       ) : null}
       <ScriptsFolderSection
+        title="Deadlock scripts folder"
+        label="Scripts folder path"
+        defaultPath="C:\Umbrella\deadlock_scripts"
         root={root}
         onRootChange={setRoot}
         onPickFolder={() => void pickFolder()}
         onSaveRoot={() => void saveRoot()}
+      />
+      <ScriptsFolderSection
+        title="Dota 2 scripts folder"
+        label="Scripts folder path"
+        defaultPath="C:\Umbrella\scripts"
+        root={dota2Root}
+        onRootChange={setDota2Root}
+        onPickFolder={() => void pickDota2Folder()}
+        onSaveRoot={() => void saveDota2Root()}
       />
       <CatalogSection lastSync={lastSync} />
       <ScriptUpdatesSection

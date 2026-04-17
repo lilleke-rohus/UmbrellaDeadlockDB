@@ -1,6 +1,11 @@
 import { supabase } from './supabase'
-import type { InstallManifest } from '../../../shared/ipc'
+import type { ActiveGame, InstallManifest } from '../../../shared/ipc'
 import { getManifestEntry, shouldUpdate } from './scriptNeedsUpdate'
+
+const SCRIPT_TABLE: Record<ActiveGame, string> = {
+  deadlock: 'scripts',
+  dota2: 'dota2_scripts',
+}
 
 export type AutoUpdateResult = {
   updated: number
@@ -12,12 +17,12 @@ export type AutoUpdateResult = {
  * Compares every entry in the install manifest against the published store version.
  * Downloads and overwrites any script whose content_version or updated_at is newer.
  */
-export async function runAutoUpdate(): Promise<AutoUpdateResult> {
+export async function runAutoUpdate(game: ActiveGame = 'deadlock'): Promise<AutoUpdateResult> {
   if (!supabase) {
     return { updated: 0, skipped: 0, errors: ['Supabase not configured'] }
   }
 
-  const manifest = await window.umbrella.getManifest()
+  const manifest = await window.umbrella.getManifest(game)
   const entries = Object.values(manifest.entries)
 
   if (entries.length === 0) {
@@ -27,7 +32,7 @@ export async function runAutoUpdate(): Promise<AutoUpdateResult> {
   const ids = entries.map((e) => e.scriptId)
 
   const { data: scripts, error } = await supabase
-    .from('scripts')
+    .from(SCRIPT_TABLE[game])
     .select('id, filename, content_version, content_hash, updated_at, lua_source')
     .in('id', ids)
     .eq('status', 'published')
@@ -60,7 +65,7 @@ export async function runAutoUpdate(): Promise<AutoUpdateResult> {
       continue
     }
 
-    const writeRes = await window.umbrella.writeScript(row.filename, row.lua_source)
+    const writeRes = await window.umbrella.writeScript(row.filename, row.lua_source, game)
     if (!writeRes.ok) {
       errors.push(`${row.filename}: ${writeRes.error ?? 'write failed'}`)
       continue
@@ -73,7 +78,7 @@ export async function runAutoUpdate(): Promise<AutoUpdateResult> {
       contentHash: row.content_hash,
       updatedAt: row.updated_at,
       installedAt: entry.installedAt,
-    })
+    }, game)
 
     updated++
   }

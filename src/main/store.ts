@@ -5,6 +5,7 @@ import type { AppSettings, InstallManifest, ManifestEntry } from '../shared/ipc'
 
 const SETTINGS_FILE = 'settings.json'
 const MANIFEST_FILE = 'install-manifest.json'
+const MANIFEST_DOTA2_FILE = 'install-manifest-dota2.json'
 
 function dataDir(): string {
   const dir = path.join(app.getPath('userData'))
@@ -22,12 +23,20 @@ function manifestPath(): string {
   return path.join(dataDir(), MANIFEST_FILE)
 }
 
+function dota2ManifestPath(): string {
+  return path.join(dataDir(), MANIFEST_DOTA2_FILE)
+}
+
 const DEFAULT_WINDOWS_ROOT = 'C:\\Umbrella\\deadlock_scripts'
+const DEFAULT_WINDOWS_DOTA2_ROOT = 'C:\\Umbrella\\scripts'
 
 export function readSettings(): AppSettings {
   const p = settingsPath()
   if (!existsSync(p)) {
-    return { scriptsRootPath: process.platform === 'win32' ? DEFAULT_WINDOWS_ROOT : null }
+    return {
+      scriptsRootPath: process.platform === 'win32' ? DEFAULT_WINDOWS_ROOT : null,
+      dota2ScriptsRootPath: process.platform === 'win32' ? DEFAULT_WINDOWS_DOTA2_ROOT : null,
+    }
   }
   try {
     const raw = readFileSync(p, 'utf-8')
@@ -36,9 +45,16 @@ export function readSettings(): AppSettings {
       scriptsRootPath:
         typeof parsed.scriptsRootPath === 'string' ? parsed.scriptsRootPath : null,
       autoUpdateScripts: parsed.autoUpdateScripts === true,
+      dota2ScriptsRootPath:
+        typeof parsed.dota2ScriptsRootPath === 'string'
+          ? parsed.dota2ScriptsRootPath
+          : process.platform === 'win32' ? DEFAULT_WINDOWS_DOTA2_ROOT : null,
     }
   } catch {
-    return { scriptsRootPath: process.platform === 'win32' ? DEFAULT_WINDOWS_ROOT : null }
+    return {
+      scriptsRootPath: process.platform === 'win32' ? DEFAULT_WINDOWS_ROOT : null,
+      dota2ScriptsRootPath: process.platform === 'win32' ? DEFAULT_WINDOWS_DOTA2_ROOT : null,
+    }
   }
 }
 
@@ -75,4 +91,35 @@ export function upsertManifestEntry(key: string, entry: ManifestEntry | null): v
     m.entries[key] = entry
   }
   writeManifest(m)
+}
+
+export function readDota2Manifest(): InstallManifest {
+  const p = dota2ManifestPath()
+  if (!existsSync(p)) {
+    return { entries: {} }
+  }
+  try {
+    const raw = readFileSync(p, 'utf-8')
+    const parsed = JSON.parse(raw) as InstallManifest
+    if (!parsed.entries || typeof parsed.entries !== 'object') {
+      return { entries: {} }
+    }
+    return { entries: parsed.entries }
+  } catch {
+    return { entries: {} }
+  }
+}
+
+export function writeDota2Manifest(manifest: InstallManifest): void {
+  writeFileSync(dota2ManifestPath(), JSON.stringify(manifest, null, 2), 'utf-8')
+}
+
+export function upsertDota2ManifestEntry(key: string, entry: ManifestEntry | null): void {
+  const m = readDota2Manifest()
+  if (entry === null) {
+    delete m.entries[key]
+  } else {
+    m.entries[key] = entry
+  }
+  writeDota2Manifest(m)
 }

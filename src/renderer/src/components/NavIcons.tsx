@@ -1,5 +1,8 @@
 /** Minimal stroke icons matching script_marketplace_layout.html */
 
+import deadlockLogoUrl from '../../../public/deadlock/deadlock_logo.svg'
+import dotaLogoUrl from '../../../public/dota2/dota_logo.svg'
+
 export function IconStore(): React.ReactElement {
   return (
     <svg viewBox="0 0 16 16" aria-hidden>
@@ -138,4 +141,12 @@ export function IconRowScript(): React.ReactElement {
       <path d="M5 5h6M5 8h4" fill="none" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   )
+}
+
+export function IconDeadlockLogo(): React.ReactElement {
+  return <img src={deadlockLogoUrl} width={18} height={18} alt="" aria-hidden style={{ display: 'block', flexShrink: 0 }} />
+}
+
+export function IconDota2Logo(): React.ReactElement {
+  return <img src={dotaLogoUrl} width={18} height={18} alt="" aria-hidden style={{ display: 'block', flexShrink: 0 }} />
 }

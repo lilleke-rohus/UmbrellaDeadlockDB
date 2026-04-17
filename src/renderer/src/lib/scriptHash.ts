@@ -1,3 +1,4 @@
+import type { ActiveGame } from '../../../shared/ipc'
 import { parseUmbrellaHeader, stripFirstLine } from './firstLine'
 
 type HashProgress = {
@@ -54,8 +55,8 @@ export async function computeLuaContentHash(luaSource: string): Promise<string> 
   return sha256Hex(normalizeLuaForHash(luaSource))
 }
 
-async function readLocalScriptWithHash(filename: string): Promise<LocalLuaScript | null> {
-  const readResult = await window.umbrella.readLocalScript(filename)
+async function readLocalScriptWithHash(filename: string, game: ActiveGame): Promise<LocalLuaScript | null> {
+  const readResult = await window.umbrella.readLocalScript(filename, game)
   if (!readResult.content) {
     return null
   }
@@ -74,8 +75,9 @@ async function readLocalScriptWithHash(filename: string): Promise<LocalLuaScript
 
 export async function scanLocalLuaScriptsWithHashes(
   onProgress?: (progress: HashProgress) => void,
+  game: ActiveGame = 'deadlock',
 ): Promise<LocalLuaScanResult> {
-  const listed = await window.umbrella.listLocalScripts()
+  const listed = await window.umbrella.listLocalScripts(game)
   if (listed.error) {
     return { scripts: [], error: listed.error }
   }
@@ -88,7 +90,7 @@ export async function scanLocalLuaScriptsWithHashes(
   const total = names.length
   onProgress?.({ done, total })
   for (const name of names) {
-    const script = await readLocalScriptWithHash(name)
+    const script = await readLocalScriptWithHash(name, game)
     if (script) {
       scripts.push(script)
     }

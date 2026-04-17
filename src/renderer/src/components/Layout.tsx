@@ -1,16 +1,18 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useEffect, useMemo, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useGame, type ActiveGame } from '../context/GameContext'
 import { useToast } from '../context/ToastContext'
 import { APP_DISPLAY_NAME } from '../lib/appDisplayName'
 import { supabaseConfigured } from '../lib/supabase'
 import { runAutoUpdate } from '../lib/autoUpdate'
 import {
   IconAdmin,
+  IconDeadlockLogo,
+  IconDota2Logo,
   IconGrid,
   IconLibrary,
   IconList,
-  IconLogo,
   IconSearch,
   IconSettings,
   IconStore,
@@ -34,6 +36,9 @@ export type VaultOutletContext = {
   setLibraryView: (v: GridListView) => void
   libraryNewDraft: boolean
   setLibraryNewDraft: (v: boolean) => void
+  /** True while `/author` is showing Author studio (not the installed-scripts library). */
+  authorStudioActive: boolean
+  setAuthorStudioActive: (v: boolean) => void
 }
 
 type RouteFlags = {
@@ -47,6 +52,7 @@ type RouteFlags = {
 export function Layout(): ReactElement {
   const { user, role, signOut, canOpenAuthorStudio, profile } = useAuth()
   const { addToast } = useToast()
+  const { activeGame, toggleGame } = useGame()
   const location = useLocation()
 
   const [storeSearch, setStoreSearch] = useState('')
@@ -54,10 +60,16 @@ export function Layout(): ReactElement {
   const [librarySearch, setLibrarySearch] = useState('')
   const [libraryView, setLibraryView] = usePersistedGridListView(STORAGE.libraryView)
   const [libraryNewDraft, setLibraryNewDraft] = useState(false)
+  const [authorStudioActive, setAuthorStudioActive] = useState(false)
 
-  useScriptAutoUpdateOnMount(addToast)
+  useScriptAutoUpdateOnMount(addToast, activeGame)
 
   const route = useMemo(() => routeFlagsFromPath(location.pathname), [location.pathname])
+  useEffect(() => {
+    if (!route.isLibrary) {
+      setAuthorStudioActive(false)
+    }
+  }, [route.isLibrary])
   const pageTitle = useMemo(() => pageTitleFromRoute(route), [route])
   useEffect(() => {
     document.title = `${pageTitle} · ${APP_DISPLAY_NAME}`
@@ -76,6 +88,8 @@ export function Layout(): ReactElement {
     setLibraryView,
     libraryNewDraft,
     setLibraryNewDraft,
+    authorStudioActive,
+    setAuthorStudioActive,
   }
 
   return (
@@ -109,6 +123,8 @@ export function Layout(): ReactElement {
                 onSearchChange={setStoreSearch}
                 view={storeView}
                 onViewChange={setStoreView}
+                activeGame={activeGame}
+                onToggleGame={toggleGame}
               />
             )}
 
@@ -121,8 +137,10 @@ export function Layout(): ReactElement {
                 onSearchChange={setLibrarySearch}
                 view={libraryView}
                 onViewChange={setLibraryView}
+                activeGame={activeGame}
+                onToggleGame={toggleGame}
                 trailing={
-                  user && canOpenAuthorStudio ? (
+                  user && canOpenAuthorStudio && authorStudioActive ? (
                     <button type="button" className="btn btn-primary" onClick={() => setLibraryNewDraft(true)}>
                       New draft
                     </button>
@@ -155,11 +173,14 @@ function readGridListPreference(key: string): GridListView {
   return localStorage.getItem(key) === 'list' ? 'list' : 'grid'
 }
 
-function useScriptAutoUpdateOnMount(addToast: ReturnType<typeof useToast>['addToast']): void {
+function useScriptAutoUpdateOnMount(
+  addToast: ReturnType<typeof useToast>['addToast'],
+  game: ActiveGame,
+): void {
   useEffect(() => {
     void window.umbrella.getSettings().then(async (s) => {
       if (!s.autoUpdateScripts) return
-      const result = await runAutoUpdate()
+      const result = await runAutoUpdate(game)
       if (result.updated > 0) {
         addToast(`Auto-updated ${result.updated} script${result.updated !== 1 ? 's' : ''}.`, 'success')
       }
@@ -167,7 +188,7 @@ function useScriptAutoUpdateOnMount(addToast: ReturnType<typeof useToast>['addTo
         addToast(`Update errors: ${result.errors.join('; ')}`, 'error')
       }
     })
-  }, [addToast])
+  }, [addToast, game])
 }
 
 function routeFlagsFromPath(pathname: string): RouteFlags {
@@ -225,11 +246,12 @@ function SkipToMainLink(): ReactElement {
 }
 
 function TitleBar(): ReactElement {
+  const { activeGame } = useGame()
   return (
     <div className="titlebar">
       <div className="titlebar-drag">
         <div className="titlebar-logo-mark" aria-hidden>
-          <IconLogo />
+          {activeGame === 'dota2' ? <IconDota2Logo /> : <IconDeadlockLogo />}
         </div>
         <span className="titlebar-app-name">{APP_DISPLAY_NAME}</span>
       </div>
@@ -371,6 +393,8 @@ function VaultSearchTopbar({
   onSearchChange,
   view,
   onViewChange,
+  activeGame,
+  onToggleGame,
   trailing,
 }: {
   searchInputId: string
@@ -380,10 +404,10 @@ function VaultSearchTopbar({
   onSearchChange: (v: string) => void
   view: GridListView
   onViewChange: (v: GridListView) => void
+  activeGame: ActiveGame
+  onToggleGame: () => void
   trailing?: ReactNode
 }): ReactElement {
-  const focusSearch = () => document.getElementById(searchInputId)?.focus()
-
   return (
     <>
       <div className="search-wrap">
@@ -400,13 +424,35 @@ function VaultSearchTopbar({
         />
       </div>
       <div className="topbar-actions">
-        <button type="button" className="btn btn-ghost btn-compact" onClick={focusSearch}>
-          Filter
-        </button>
+        <GameSwitcherButton activeGame={activeGame} onToggle={onToggleGame} />
         {trailing}
         <ViewToggle view={view} onViewChange={onViewChange} />
       </div>
     </>
+  )
+}
+
+function GameSwitcherButton({
+  activeGame,
+  onToggle,
+}: {
+  activeGame: ActiveGame
+  onToggle: () => void
+}): ReactElement {
+  const isDota2 = activeGame === 'dota2'
+  return (
+    <button
+      type="button"
+      className="btn btn-ghost btn-compact game-switcher-btn"
+      onClick={onToggle}
+      title={isDota2 ? 'Switch to Deadlock' : 'Switch to Dota 2'}
+    >
+      {isDota2 ? (
+        <>Switch to Deadlock <IconDeadlockLogo /></>
+      ) : (
+        <>Switch to Dota 2 <IconDota2Logo /></>
+      )}
+    </button>
   )
 }
 

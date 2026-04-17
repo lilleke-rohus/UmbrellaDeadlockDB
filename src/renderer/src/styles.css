@@ -187,10 +187,8 @@ select {
 }
 
 .titlebar-logo-mark {
-  width: 16px;
-  height: 16px;
-  background: var(--color-text-primary);
-  border-radius: 4px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -200,6 +198,12 @@ select {
 .titlebar-logo-mark svg {
   width: 10px;
   height: 10px;
+}
+
+.titlebar-logo-mark img {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .titlebar-app-name {
