@@ -5,6 +5,7 @@ import { useGame } from '../context/GameContext'
 import { parseUmbrellaHeader, stripFirstLine } from '../lib/firstLine'
 import { dedupeTags, SCRIPT_TAG_PRESETS, slugifyFilename } from '../lib/tags'
 import { supabase } from '../lib/supabase'
+import { MarkdownEditor } from '../components/MarkdownEditor'
 import type { ScriptRow, ScriptStatus } from '../../../shared/supabase.types'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconScriptTile } from '../components/NavIcons'
@@ -1173,15 +1174,27 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
           )}
         </div>
 
-        <label className="field full" style={{ marginTop: 12 }}>
+        <div className="field full" style={{ marginTop: 12 }}>
           <span>Description</span>
-          <textarea rows={3} className="field-textarea" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        </label>
+          <MarkdownEditor
+            className="field-textarea"
+            value={form.description}
+            onChange={(md) => setForm({ ...form, description: md })}
+            placeholder="Describe what the script does. Markdown supported."
+            minHeight={120}
+          />
+        </div>
 
-        <label className="field full">
+        <div className="field full">
           <span>Changelog</span>
-          <textarea rows={2} className="field-textarea" value={form.changelog} onChange={(e) => setForm({ ...form, changelog: e.target.value })} />
-        </label>
+          <MarkdownEditor
+            className="field-textarea"
+            value={form.changelog}
+            onChange={(md) => setForm({ ...form, changelog: md })}
+            placeholder="What changed in this version? Markdown supported."
+            minHeight={100}
+          />
+        </div>
 
         <div className="field full">
           <span className="setting-label">Lua source</span>
