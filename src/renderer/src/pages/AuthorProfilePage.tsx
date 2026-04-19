@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { stripMarkdown } from '../lib/stripMarkdown'
 import type { ScriptRow } from '../../../shared/supabase.types'
 
 type AuthorProfile = { id: string; display_name: string | null }
@@ -106,7 +107,7 @@ export function AuthorProfilePage(): React.ReactElement {
           >
             <div className="row-info">
               <div className="row-name">{s.title}</div>
-              <div className="row-desc line-clamp">{s.description ?? s.filename}</div>
+              <div className="row-desc line-clamp">{stripMarkdown(s.description) || s.filename}</div>
             </div>
             <div className="row-right">
               {s.tags?.slice(0, 2).map((t) => (
