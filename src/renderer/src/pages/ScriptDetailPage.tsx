@@ -9,6 +9,7 @@ import type { CachedScriptMeta } from '../lib/catalogDb'
 import { useToast } from '../context/ToastContext'
 import { userFacingMessage } from '../lib/userFacingError'
 import { IconScriptTile } from '../components/NavIcons'
+import { MarkdownView } from '../components/MarkdownView'
 
 const SCRIPT_TABLE = { deadlock: 'scripts', dota2: 'dota2_scripts' } as const
 const CHANGELOG_TABLE = { deadlock: 'script_changelog', dota2: 'dota2_script_changelog' } as const
@@ -301,7 +302,7 @@ export function ScriptDetailPage(): React.ReactElement {
         <h2 className="detail-section-label" id="description-heading">
           Description
         </h2>
-        <p className="detail-desc">{row.description?.trim() || 'No description.'}</p>
+        <MarkdownView className="detail-desc" source={row.description} empty="No description." />
       </section>
 
       {/* Tags */}
@@ -323,7 +324,7 @@ export function ScriptDetailPage(): React.ReactElement {
                 <div className="muted small" style={{ marginBottom: '0.25rem' }}>
                   v{entry.version} · {new Date(entry.created_at).toLocaleDateString()}
                 </div>
-                <pre className="changelog">{entry.body}</pre>
+                <MarkdownView className="changelog" source={entry.body} />
               </div>
             ))}
           </div>
@@ -332,7 +333,7 @@ export function ScriptDetailPage(): React.ReactElement {
         <section className="settings-section" aria-labelledby="changelog-heading">
           <div className="settings-section-title" id="changelog-heading">Changelog</div>
           <div className="changelog-box">
-            <pre className="changelog">{row.changelog}</pre>
+            <MarkdownView className="changelog" source={row.changelog} />
           </div>
         </section>
       ) : null}
