@@ -1,7 +1,52 @@
-﻿/* Theme tokens */
+﻿/* ──────────────────────────────────────────────────────────
+   FONT TRIAL — easy to remove if you don't like it.
+   Delete this whole block + the `font-family` overrides at
+   the bottom (search for "FONT TRIAL — overrides") to revert.
+   ────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Valve Pulp';
+  src: url('../../public/fonts/valvepulp-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Valve Oracle';
+  src: url('../../public/fonts/valveoracle-medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Hahmlet';
+  src: url('../../public/fonts/hahmlet-medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Forevs Demo';
+  src: url('../../public/fonts/forevsdemo-medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+/* ── end FONT TRIAL @font-face ──────────────────────────── */
+
+/* Theme tokens */
 :root {
   color-scheme: dark;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* FONT TRIAL — role-based font tokens */
+  --font-display: 'Valve Oracle', var(--font-sans);  /* titles / headings */
+  --font-body: 'Valve Pulp', var(--font-sans);       /* main / large text */
+  --font-small: 'Hahmlet', var(--font-sans);         /* small / meta text */
+  --font-ui: 'Forevs Demo', var(--font-sans);        /* buttons, badges, UI accents */
+
   --border-radius-lg: 12px;
   --border-radius-md: 8px;
 
@@ -2299,3 +2344,40 @@ kbd {
   padding: 12px 14px;
   border-top: 0.5px solid var(--color-border-secondary);
 }
+
+/* ──────────────────────────────────────────────────────────
+   FONT TRIAL — overrides
+   Currently:
+     • Valve Pulp on all main titles + stat numbers
+     • Valve Oracle on sidebar nav items
+   Everything else uses the system sans.
+   Available vars (all four @font-face are loaded above):
+     --font-display  Valve Oracle
+     --font-body     Valve Pulp
+     --font-small    Hahmlet
+     --font-ui       Forevs Demo
+   To use one elsewhere, just add a selector with the var.
+   ────────────────────────────────────────────────────────── */
+
+/* Page / section titles — Valve Pulp (item-level titles like card-name and
+   detail-title intentionally left as system sans) */
+.page-title,
+.section-title,
+.app-modal-title,
+.auth-shell-title,
+.stat-val,
+.titlebar-app-name {
+  font-family: var(--font-body);
+}
+
+/* Sidebar / navbar text + buttons — Valve Oracle */
+.nav-item,
+.nav-label,
+.logo-name,
+.btn,
+.install-btn,
+.tab-seg-btn,
+.auth-shell-submit {
+  font-family: var(--font-display);
+}
+/* ── end FONT TRIAL — overrides ─────────────────────────── */
