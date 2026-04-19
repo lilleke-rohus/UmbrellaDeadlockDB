@@ -7,6 +7,7 @@ import { IconRowScript, IconScriptTile } from '../components/NavIcons'
 import { useGame } from '../context/GameContext'
 import { useToast } from '../context/ToastContext'
 import { scanLocalLuaScriptsWithHashes, summarizeHashCheckAgainstCatalog } from '../lib/scriptHash'
+import { stripMarkdown } from '../lib/stripMarkdown'
 
 type SortMode = 'newest' | 'oldest' | 'az' | 'za'
 type CatalogItem = ReturnType<typeof useCatalog>['items'][number]
@@ -256,7 +257,7 @@ export function HomePage(): React.ReactElement {
               </div>
               <div className="card-name">{s.title}</div>
               <div className="card-author">by {s.author_display_name ?? 'Author'}</div>
-              <div className="card-desc line-clamp">{s.description ?? 'No description.'}</div>
+              <div className="card-desc line-clamp">{stripMarkdown(s.description) || 'No description.'}</div>
               {s.tags && s.tags.length > 0 && (
                 <div className="card-tags">
                   {s.tags.slice(0, 5).map((t) => (
@@ -290,7 +291,7 @@ export function HomePage(): React.ReactElement {
               <div className="row-info">
                 <div className="row-name">{s.title}</div>
                 <div className="row-desc line-clamp">
-                  {s.description ?? 'No description.'} · by {s.author_display_name ?? 'Author'}
+                  {stripMarkdown(s.description) || 'No description.'} · by {s.author_display_name ?? 'Author'}
                 </div>
               </div>
               <div className="row-right">
