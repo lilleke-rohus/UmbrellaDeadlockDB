@@ -1754,7 +1754,6 @@ select {
   font-size: 13px;
   line-height: 1.65;
   color: var(--color-text-primary);
-  white-space: pre-line;
 }
 
 .detail-desc-section {
@@ -1811,12 +1810,88 @@ select {
   border: 0.5px solid rgba(59, 130, 246, 0.3);
 }
 
-.changelog {
+pre.changelog {
   white-space: pre-wrap;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 12px;
   margin: 0;
   color: var(--color-text-secondary);
+}
+
+div.changelog {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* Reset browser default margins inside markdown renders */
+.detail-desc p, .detail-desc h1, .detail-desc h2, .detail-desc h3,
+.detail-desc h4, .detail-desc h5, .detail-desc h6,
+.detail-desc ul, .detail-desc ol, .detail-desc blockquote,
+div.changelog p, div.changelog h1, div.changelog h2, div.changelog h3,
+div.changelog h4, div.changelog h5, div.changelog h6,
+div.changelog ul, div.changelog ol, div.changelog blockquote {
+  margin-top: 0;
+  margin-bottom: 0.4em;
+}
+.detail-desc *:last-child, div.changelog *:last-child {
+  margin-bottom: 0;
+}
+
+/* MDXEditor — dark theme to match project */
+.field-textarea [role="toolbar"] {
+  background: var(--color-background-primary);
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;
+  padding: 2px 4px;
+  gap: 2px;
+}
+
+.field-textarea [role="toolbar"] button,
+.field-textarea [role="toolbar"] select,
+.field-textarea [role="toolbar"] [role="separator"] {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: none;
+  border-radius: var(--border-radius-md);
+}
+
+.field-textarea [role="toolbar"] button svg,
+.field-textarea [role="toolbar"] button span,
+.field-textarea [role="toolbar"] select,
+.field-textarea [role="toolbar"] * {
+  color: var(--color-text-secondary);
+  fill: currentColor;
+}
+
+.field-textarea [role="toolbar"] button:hover,
+.field-textarea [role="toolbar"] button:hover svg,
+.field-textarea [role="toolbar"] button:hover * {
+  background: transparent;
+  color: var(--color-text-primary);
+  fill: currentColor;
+}
+
+.field-textarea [role="toolbar"] button:hover {
+  background: var(--color-background-secondary);
+}
+
+.field-textarea [role="toolbar"] button[data-state="on"],
+.field-textarea [role="toolbar"] button[aria-pressed="true"],
+.field-textarea [role="toolbar"] button[data-state="on"] svg,
+.field-textarea [role="toolbar"] button[aria-pressed="true"] svg {
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  fill: currentColor;
+}
+
+.field-textarea [contenteditable] {
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  min-height: 80px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 0 0 var(--border-radius-md) var(--border-radius-md);
 }
 
 .changelog-box {

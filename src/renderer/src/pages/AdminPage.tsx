@@ -55,6 +55,21 @@ function normalizeCoauthorRows(data: unknown): CoauthorRow[] {
   }))
 }
 
+/** Store-facing author label: admin override wins, else linked profile name. */
+function scriptAuthorDisplay(
+  script: Pick<ScriptListRow, 'author_id' | 'author_display_name_override'>,
+  profiles: AdminProfileRow[],
+): string {
+  const override = script.author_display_name_override?.trim()
+  if (override) return override
+  const profile = profiles.find((p) => p.id === script.author_id)
+  const name = profile?.display_name?.trim()
+  if (name) return name
+  const fromEmail = profile?.email?.split('@')[0]?.trim()
+  if (fromEmail) return fromEmail
+  return '—'
+}
+
 export function AdminPage(): React.ReactElement {
   const { user } = useAuth()
   const { addToast } = useToast()
@@ -190,8 +205,9 @@ export function AdminPage(): React.ReactElement {
     if (!supabase) {
       return
     }
+    const client = supabase
     await runBusyTask(async () => {
-      const { data, error } = await supabase.rpc('admin_generate_missing_script_hashes')
+      const { data, error } = await client.rpc('admin_generate_missing_script_hashes')
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
@@ -209,8 +225,9 @@ export function AdminPage(): React.ReactElement {
 
   async function hideScript(script: ScriptListRow): Promise<void> {
     if (!supabase) return
+    const client = supabase
     await runBusyTask(async () => {
-      const { error } = await supabase
+      const { error } = await client
         .from('scripts')
         .update({ status: 'rejected', rejected_reason: 'Hidden by admin' })
         .eq('id', script.id)
@@ -225,8 +242,9 @@ export function AdminPage(): React.ReactElement {
 
   async function showScript(script: ScriptListRow): Promise<void> {
     if (!supabase) return
+    const client = supabase
     await runBusyTask(async () => {
-      const { error } = await supabase
+      const { error } = await client
         .from('scripts')
         .update({ status: 'published', rejected_reason: null })
         .eq('id', script.id)
@@ -244,8 +262,9 @@ export function AdminPage(): React.ReactElement {
     if (!confirm(`Delete "${script.title}" permanently?`)) {
       return
     }
+    const client = supabase
     await runBusyTask(async () => {
-      const { error } = await supabase.from('scripts').delete().eq('id', script.id)
+      const { error } = await client.from('scripts').delete().eq('id', script.id)
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
@@ -421,7 +440,7 @@ export function AdminPage(): React.ReactElement {
               <thead>
                 <tr>
                   <th>Script</th>
-                  <th>Slug</th>
+                  <th>Author</th>
                   <th>Status</th>
                   <th>Reason</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
@@ -433,7 +452,12 @@ export function AdminPage(): React.ReactElement {
                     <td>
                       <strong>{script.title}</strong>
                     </td>
-                    <td className="mono small">{script.slug}</td>
+                    <td className="small">
+                      {scriptAuthorDisplay(script, profiles)}
+                      {script.author_display_name_override?.trim() ? (
+                        <span className="muted"> (override)</span>
+                      ) : null}
+                    </td>
                     <td>
                       <span className={`status-pill ${SCRIPT_STATUS_PILL_CLASS[script.status]}`}>
                         {SCRIPT_STATUS_LABEL[script.status]}
