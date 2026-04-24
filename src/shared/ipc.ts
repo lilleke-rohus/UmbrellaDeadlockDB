@@ -5,8 +5,7 @@ export type PickLuaScriptFileResult =
 export const IPC_CHANNELS = {
   getSettings: 'umbrella:get-settings',
   updateSettings: 'umbrella:update-settings',
-  setScriptsRoot: 'umbrella:set-scripts-root',
-  setDota2ScriptsRoot: 'umbrella:set-dota2-scripts-root',
+  setUmbrellaRoot: 'umbrella:set-umbrella-root',
   pickScriptsDirectory: 'umbrella:pick-scripts-directory',
   pickLuaScriptFile: 'umbrella:pick-lua-script-file',
   listLocalScripts: 'umbrella:list-local-scripts',
@@ -29,17 +28,17 @@ export const IPC_CHANNELS = {
   appUpdateDownloadProgress: 'umbrella:app-update-download-progress',
   appUpdateDownloaded: 'umbrella:app-update-downloaded',
   appUpdateError: 'umbrella:app-update-error',
-  /** Main → renderer: Supabase auth redirect opened this app (password recovery, etc.). */
+  /** Main → renderer: Supabase auth redirect */
   authDeepLink: 'umbrella:auth-deep-link',
   getPendingAuthDeepLink: 'umbrella:get-pending-auth-deep-link',
+  launchLoader: 'umbrella:launch-loader',
 } as const
 
 export type ActiveGame = 'deadlock' | 'dota2'
 
 export type AppSettings = {
-  scriptsRootPath: string | null
+  umbrellaRootPath: string | null
   autoUpdateScripts?: boolean
-  dota2ScriptsRootPath: string | null
 }
 
 export type ManifestEntry = {
@@ -69,8 +68,7 @@ export type AppUpdateProgress = {
 export type IpcApi = {
   getSettings: () => Promise<AppSettings>
   updateSettings: (patch: Partial<AppSettings>) => Promise<{ ok: boolean; error?: string }>
-  setScriptsRoot: (rootPath: string) => Promise<{ ok: boolean; error?: string }>
-  setDota2ScriptsRoot: (rootPath: string) => Promise<{ ok: boolean; error?: string }>
+  setUmbrellaRoot: (rootPath: string) => Promise<{ ok: boolean; error?: string }>
   pickScriptsDirectory: () => Promise<string | null>
   pickLuaScriptFile: () => Promise<PickLuaScriptFileResult | null>
   listLocalScripts: (game?: ActiveGame) => Promise<{ names: string[]; error?: string }>
@@ -93,7 +91,8 @@ export type IpcApi = {
   onAppUpdateDownloadProgress: (handler: (progress: AppUpdateProgress) => void) => () => void
   onAppUpdateDownloaded: (handler: (info: AppUpdateInfo) => void) => () => void
   onAppUpdateError: (handler: (message: string) => void) => () => void
-  /** One-shot: URL from cold start (e.g. Windows protocol launch) before the renderer subscribed. */
+  /** One-shot: URL from cold start */
   getPendingAuthDeepLink: () => Promise<string | null>
   onAuthDeepLink: (handler: (url: string) => void) => () => void
+  launchLoader: () => Promise<{ ok: boolean; error?: string }>
 }

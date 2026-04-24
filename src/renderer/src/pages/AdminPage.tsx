@@ -6,6 +6,18 @@ import { userFacingMessage } from '../lib/userFacingError'
 import type { AdminSettingRow, ProfileRole, ScriptRow } from '../../../shared/supabase.types'
 import { Modal } from '../components/Modal'
 
+type AdminGame = 'deadlock' | 'dota2'
+
+const SCRIPT_TABLE: Record<AdminGame, 'scripts' | 'dota2_scripts'> = {
+  deadlock: 'scripts',
+  dota2: 'dota2_scripts',
+}
+
+const COAUTHOR_TABLE: Record<AdminGame, 'script_coauthors' | 'dota2_script_coauthors'> = {
+  deadlock: 'script_coauthors',
+  dota2: 'dota2_script_coauthors',
+}
+
 type AdminProfileRow = {
   id: string
   display_name: string | null
@@ -22,13 +34,18 @@ type CoauthorRow = {
   script_id: string
   profile_id: string
   created_at: string
+  game: AdminGame
   scripts: { slug: string; title: string } | null
 }
 
 const ROLE_OPTIONS: ProfileRole[] = ['reader', 'author', 'moderator', 'admin']
 
-type ScriptListRow = Pick<ScriptRow, 'id' | 'slug' | 'title' | 'author_id' | 'status' | 'content_hash' | 'rejected_reason'> & {
+type AdminScriptRow = Pick<
+  ScriptRow,
+  'id' | 'slug' | 'title' | 'author_id' | 'status' | 'content_hash' | 'rejected_reason' | 'updated_at'
+> & {
   author_display_name_override?: string | null
+  game: AdminGame
 }
 
 const SCRIPT_STATUS_PILL_CLASS: Readonly<Record<ScriptRow['status'], string>> = {
@@ -45,19 +62,32 @@ const SCRIPT_STATUS_LABEL: Readonly<Record<ScriptRow['status'], string>> = {
   rejected: 'Hidden',
 }
 
-function normalizeCoauthorRows(data: unknown): CoauthorRow[] {
-  type RawCoauthor = Omit<CoauthorRow, 'scripts'> & {
+function normalizeCoauthorRows(data: unknown, game: AdminGame): CoauthorRow[] {
+  type RawCoauthor = Omit<CoauthorRow, 'game' | 'scripts'> & {
     scripts: { slug: string; title: string }[] | { slug: string; title: string } | null
   }
   return ((data as RawCoauthor[]) ?? []).map((row) => ({
     ...row,
+    game,
     scripts: Array.isArray(row.scripts) ? (row.scripts[0] ?? null) : row.scripts,
   }))
 }
 
-/** Store-facing author label: admin override wins, else linked profile name. */
+function gameLabel(game: AdminGame): string {
+  switch (game) {
+    case 'deadlock':
+      return 'Deadlock'
+    case 'dota2':
+      return 'Dota 2'
+    default: {
+      const _exhaustive: never = game
+      return _exhaustive
+    }
+  }
+}
+
 function scriptAuthorDisplay(
-  script: Pick<ScriptListRow, 'author_id' | 'author_display_name_override'>,
+  script: Pick<AdminScriptRow, 'author_id' | 'author_display_name_override'>,
   profiles: AdminProfileRow[],
 ): string {
   const override = script.author_display_name_override?.trim()
@@ -74,12 +104,12 @@ export function AdminPage(): React.ReactElement {
   const { user } = useAuth()
   const { addToast } = useToast()
   const [profiles, setProfiles] = useState<AdminProfileRow[]>([])
-  const [scripts, setScripts] = useState<ScriptListRow[]>([])
+  const [scripts, setScripts] = useState<AdminScriptRow[]>([])
   const [settings, setSettings] = useState<AdminSettingRow[]>([])
   const [coauthors, setCoauthors] = useState<CoauthorRow[]>([])
   const [busy, setBusy] = useState(false)
 
-  const [editingScriptId, setEditingScriptId] = useState<string | null>(null)
+  const [editingScriptRef, setEditingScriptRef] = useState<{ game: AdminGame; id: string } | null>(null)
   const [editCoProfileId, setEditCoProfileId] = useState('')
   const [editOverrideName, setEditOverrideName] = useState('')
 
@@ -102,16 +132,28 @@ export function AdminPage(): React.ReactElement {
     if (!supabase) {
       return
     }
-    const { data, error } = await supabase
-      .from('scripts')
-      .select('id, slug, title, author_id, status, content_hash, rejected_reason, author_display_name_override')
-      .order('updated_at', { ascending: false })
-      .limit(500)
-    if (error) {
-      addToast(userFacingMessage(error), 'error')
-      return
+    const select =
+      'id, slug, title, author_id, status, content_hash, rejected_reason, author_display_name_override, updated_at'
+    const [deadRes, dotaRes] = await Promise.all([
+      supabase.from('scripts').select(select).order('updated_at', { ascending: false }).limit(500),
+      supabase.from('dota2_scripts').select(select).order('updated_at', { ascending: false }).limit(500),
+    ])
+    const combined: AdminScriptRow[] = []
+    if (deadRes.error) {
+      addToast(userFacingMessage(deadRes.error), 'error')
+    } else {
+      for (const row of (deadRes.data ?? []) as Omit<AdminScriptRow, 'game'>[]) {
+        combined.push({ ...row, game: 'deadlock' })
+      }
     }
-    setScripts((data as ScriptListRow[]) ?? [])
+    if (dotaRes.error) {
+      addToast(userFacingMessage(dotaRes.error), 'error')
+    } else {
+      for (const row of (dotaRes.data ?? []) as Omit<AdminScriptRow, 'game'>[]) {
+        combined.push({ ...row, game: 'dota2' })
+      }
+    }
+    setScripts(combined)
   }, [addToast])
 
   const loadSettings = useCallback(async () => {
@@ -130,16 +172,44 @@ export function AdminPage(): React.ReactElement {
     if (!supabase) {
       return
     }
-    const { data, error } = await supabase
-      .from('script_coauthors')
-      .select('id, script_id, profile_id, created_at, scripts(slug, title)')
-      .order('created_at', { ascending: false })
-      .limit(200)
-    if (error) {
-      addToast(userFacingMessage(error), 'error')
-      return
+    const [deadRes, dotaRes] = await Promise.all([
+      supabase
+        .from('script_coauthors')
+        .select('id, script_id, profile_id, created_at, scripts(slug, title)')
+        .order('created_at', { ascending: false })
+        .limit(200),
+      supabase
+        .from('dota2_script_coauthors')
+        .select('id, script_id, profile_id, created_at, dota2_scripts(slug, title)')
+        .order('created_at', { ascending: false })
+        .limit(200),
+    ])
+    const combined: CoauthorRow[] = []
+    if (deadRes.error) {
+      addToast(userFacingMessage(deadRes.error), 'error')
+    } else {
+      combined.push(...normalizeCoauthorRows(deadRes.data, 'deadlock'))
     }
-    setCoauthors(normalizeCoauthorRows(data))
+    if (dotaRes.error) {
+      addToast(userFacingMessage(dotaRes.error), 'error')
+    } else {
+      type DotaCoRow = {
+        id: string
+        script_id: string
+        profile_id: string
+        created_at: string
+        dota2_scripts: { slug: string; title: string }[] | { slug: string; title: string } | null
+      }
+      const mapped = ((dotaRes.data ?? []) as DotaCoRow[]).map((row) => ({
+        id: row.id,
+        script_id: row.script_id,
+        profile_id: row.profile_id,
+        created_at: row.created_at,
+        scripts: row.dota2_scripts,
+      }))
+      combined.push(...normalizeCoauthorRows(mapped, 'dota2'))
+    }
+    setCoauthors(combined)
   }, [addToast])
 
   const reloadAll = useCallback(async () => {
@@ -159,17 +229,15 @@ export function AdminPage(): React.ReactElement {
     if (!supabase) {
       return
     }
-    setBusy(true)
-    try {
-      const { error } = await supabase.from('profiles').update(patch).eq('id', id)
+    const client = supabase
+    await runBusyTask(async () => {
+      const { error } = await client.from('profiles').update(patch).eq('id', id)
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
       }
       await loadProfiles()
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   async function runBusyTask(task: () => Promise<void>): Promise<void> {
@@ -181,7 +249,7 @@ export function AdminPage(): React.ReactElement {
     }
   }
 
-  async function saveAuthorOverrideForScript(scriptId: string): Promise<void> {
+  async function saveAuthorOverrideForScript(game: AdminGame, scriptId: string): Promise<void> {
     if (!supabase) {
       return
     }
@@ -189,7 +257,7 @@ export function AdminPage(): React.ReactElement {
     await runBusyTask(async () => {
       const value = editOverrideName.trim() || null
       const { error } = await client
-        .from('scripts')
+        .from(SCRIPT_TABLE[game])
         .update({ author_display_name_override: value })
         .eq('id', scriptId)
       if (error) {
@@ -223,12 +291,12 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  async function hideScript(script: ScriptListRow): Promise<void> {
+  async function hideScript(script: AdminScriptRow): Promise<void> {
     if (!supabase) return
     const client = supabase
     await runBusyTask(async () => {
       const { error } = await client
-        .from('scripts')
+        .from(SCRIPT_TABLE[script.game])
         .update({ status: 'rejected', rejected_reason: 'Hidden by admin' })
         .eq('id', script.id)
       if (error) {
@@ -240,12 +308,12 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  async function showScript(script: ScriptListRow): Promise<void> {
+  async function showScript(script: AdminScriptRow): Promise<void> {
     if (!supabase) return
     const client = supabase
     await runBusyTask(async () => {
       const { error } = await client
-        .from('scripts')
+        .from(SCRIPT_TABLE[script.game])
         .update({ status: 'published', rejected_reason: null })
         .eq('id', script.id)
       if (error) {
@@ -257,14 +325,14 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  async function deleteScript(script: ScriptListRow): Promise<void> {
+  async function deleteScript(script: AdminScriptRow): Promise<void> {
     if (!supabase) return
     if (!confirm(`Delete "${script.title}" permanently?`)) {
       return
     }
     const client = supabase
     await runBusyTask(async () => {
-      const { error } = await client.from('scripts').delete().eq('id', script.id)
+      const { error } = await client.from(SCRIPT_TABLE[script.game]).delete().eq('id', script.id)
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
@@ -275,12 +343,12 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  async function clearAuthorOverride(id: string): Promise<void> {
+  async function clearAuthorOverride(game: AdminGame, id: string): Promise<void> {
     if (!supabase) return
     const client = supabase
     await runBusyTask(async () => {
       const { error } = await client
-        .from('scripts')
+        .from(SCRIPT_TABLE[game])
         .update({ author_display_name_override: null })
         .eq('id', id)
       if (error) {
@@ -339,14 +407,14 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  async function addCoauthorToScript(scriptId: string): Promise<void> {
+  async function addCoauthorToScript(game: AdminGame, scriptId: string): Promise<void> {
     if (!supabase || !editCoProfileId.trim()) {
       addToast('Enter a profile UUID.', 'error')
       return
     }
     const client = supabase
     await runBusyTask(async () => {
-      const { error } = await client.from('script_coauthors').insert({
+      const { error } = await client.from(COAUTHOR_TABLE[game]).insert({
         script_id: scriptId,
         profile_id: editCoProfileId.trim()
       })
@@ -359,13 +427,13 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
-  async function removeCoauthor(id: string): Promise<void> {
+  async function removeCoauthor(row: CoauthorRow): Promise<void> {
     if (!supabase || !confirm('Remove this coauthor?')) {
       return
     }
     const client = supabase
     await runBusyTask(async () => {
-      const { error } = await client.from('script_coauthors').delete().eq('id', id)
+      const { error } = await client.from(COAUTHOR_TABLE[row.game]).delete().eq('id', row.id)
       if (error) {
         addToast(userFacingMessage(error), 'error')
         return
@@ -375,16 +443,24 @@ export function AdminPage(): React.ReactElement {
   }
 
   const missingHashCount = useMemo(() => scripts.filter((s) => !s.content_hash).length, [scripts])
-  const storeManagedScripts = useMemo(
-    () => scripts.filter((script) => script.status === 'published' || script.status === 'rejected'),
-    [scripts],
-  )
+  const storeManagedScripts = useMemo(() => {
+    const list = scripts.filter((script) => script.status === 'published' || script.status === 'rejected')
+    return [...list].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+  }, [scripts])
   const editingScript = useMemo(
-    () => (editingScriptId ? scripts.find((script) => script.id === editingScriptId) ?? null : null),
-    [editingScriptId, scripts],
+    () =>
+      editingScriptRef
+        ? scripts.find((script) => script.id === editingScriptRef.id && script.game === editingScriptRef.game) ?? null
+        : null,
+    [editingScriptRef, scripts],
   )
   const editingScriptCoauthors = useMemo(
-    () => (editingScript ? coauthors.filter((coauthor) => coauthor.script_id === editingScript.id) : []),
+    () =>
+      editingScript
+        ? coauthors.filter(
+            (coauthor) => coauthor.script_id === editingScript.id && coauthor.game === editingScript.game,
+          )
+        : [],
     [coauthors, editingScript],
   )
 
@@ -432,7 +508,8 @@ export function AdminPage(): React.ReactElement {
       <section className="settings-section">
         <div className="settings-section-title">Store visibility</div>
         <p className="setting-desc" style={{ marginBottom: 12 }}>
-          Hide scripts from the store, republish hidden scripts, delete scripts, and manage store collaborators.
+          Hide scripts from the Deadlock or Dota 2 store, republish hidden scripts, delete scripts, and manage store
+          collaborators.
         </p>
         <div className="admin-scroll">
           <div className="admin-table-wrap">
@@ -440,6 +517,7 @@ export function AdminPage(): React.ReactElement {
               <thead>
                 <tr>
                   <th>Script</th>
+                  <th>Game</th>
                   <th>Author</th>
                   <th>Status</th>
                   <th>Reason</th>
@@ -448,10 +526,11 @@ export function AdminPage(): React.ReactElement {
               </thead>
               <tbody>
                 {storeManagedScripts.map((script) => (
-                  <tr key={script.id}>
+                  <tr key={`${script.game}-${script.id}`}>
                     <td>
                       <strong>{script.title}</strong>
                     </td>
+                    <td className="small">{gameLabel(script.game)}</td>
                     <td className="small">
                       {scriptAuthorDisplay(script, profiles)}
                       {script.author_display_name_override?.trim() ? (
@@ -471,18 +550,20 @@ export function AdminPage(): React.ReactElement {
                           className="btn"
                           disabled={busy}
                           onClick={() => {
-                            if (editingScriptId === script.id) {
-                              setEditingScriptId(null)
+                            if (editingScriptRef?.game === script.game && editingScriptRef?.id === script.id) {
+                              setEditingScriptRef(null)
                               setEditCoProfileId('')
                               setEditOverrideName('')
                               return
                             }
-                            setEditingScriptId(script.id)
+                            setEditingScriptRef({ game: script.game, id: script.id })
                             setEditCoProfileId('')
                             setEditOverrideName(script.author_display_name_override ?? '')
                           }}
                         >
-                          {editingScriptId === script.id ? 'Close edit' : 'Edit'}
+                          {editingScriptRef?.game === script.game && editingScriptRef?.id === script.id
+                            ? 'Close edit'
+                            : 'Edit'}
                         </button>
                         {script.status === 'published' ? (
                           <button type="button" className="btn" disabled={busy} onClick={() => void hideScript(script)}>
@@ -514,9 +595,11 @@ export function AdminPage(): React.ReactElement {
 
       <Modal
         isOpen={Boolean(editingScript)}
-        title={editingScript ? `Edit script: ${editingScript.title}` : 'Edit script'}
+        title={
+          editingScript ? `Edit script (${gameLabel(editingScript.game)}): ${editingScript.title}` : 'Edit script'
+        }
         onClose={() => {
-          setEditingScriptId(null)
+          setEditingScriptRef(null)
           setEditCoProfileId('')
           setEditOverrideName('')
         }}
@@ -542,7 +625,7 @@ export function AdminPage(): React.ReactElement {
                   type="button"
                   className="btn btn-primary"
                   disabled={busy}
-                  onClick={() => void addCoauthorToScript(editingScript.id)}
+                  onClick={() => void addCoauthorToScript(editingScript.game, editingScript.id)}
                 >
                   Add coauthor
                 </button>
@@ -559,7 +642,7 @@ export function AdminPage(): React.ReactElement {
                     type="button"
                     className="btn danger"
                     disabled={busy}
-                    onClick={() => void removeCoauthor(coauthor.id)}
+                    onClick={() => void removeCoauthor(coauthor)}
                   >
                     Remove
                   </button>
@@ -584,7 +667,7 @@ export function AdminPage(): React.ReactElement {
                   type="button"
                   className="btn btn-primary"
                   disabled={busy}
-                  onClick={() => void saveAuthorOverrideForScript(editingScript.id)}
+                  onClick={() => void saveAuthorOverrideForScript(editingScript.game, editingScript.id)}
                 >
                   Save override
                 </button>
@@ -592,7 +675,7 @@ export function AdminPage(): React.ReactElement {
                   type="button"
                   className="btn danger"
                   disabled={busy}
-                  onClick={() => void clearAuthorOverride(editingScript.id)}
+                  onClick={() => void clearAuthorOverride(editingScript.game, editingScript.id)}
                 >
                   Clear override
                 </button>

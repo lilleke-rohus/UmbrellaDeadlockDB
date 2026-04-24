@@ -117,12 +117,30 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
     setCanOpenAuthorStudio(false)
     setCanOpenAuthorStudioLoading(true)
     let cancelled = false
-    void supabase.rpc('user_has_script_editor_access').then(({ data, error }) => {
-      if (!cancelled && !error) {
-        setCanOpenAuthorStudio(Boolean(data))
+    const uid = session.user.id
+
+    void (async () => {
+      const { data, error } = await supabase.rpc('user_has_script_editor_access')
+      if (cancelled) {
+        return
       }
-      if (!cancelled) setCanOpenAuthorStudioLoading(false)
-    })
+      if (!error) {
+        setCanOpenAuthorStudio(Boolean(data))
+        setCanOpenAuthorStudioLoading(false)
+        return
+      }
+      const [deadRes, dotaRes] = await Promise.all([
+        supabase.from('script_coauthors').select('id').eq('profile_id', uid).limit(1).maybeSingle(),
+        supabase.from('dota2_script_coauthors').select('id').eq('profile_id', uid).limit(1).maybeSingle(),
+      ])
+      if (cancelled) {
+        return
+      }
+      const hasCoauthorRow = Boolean(deadRes.data ?? dotaRes.data)
+      setCanOpenAuthorStudio(hasCoauthorRow)
+      setCanOpenAuthorStudioLoading(false)
+    })()
+
     return () => {
       cancelled = true
     }

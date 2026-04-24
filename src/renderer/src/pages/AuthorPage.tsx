@@ -37,6 +37,9 @@ type DraftForm = {
   status: ScriptStatus
 }
 
+/** Shown in admin / DB when the author uses "Hide from store". */
+const SCRIPT_REJECTED_REASON_AUTHOR_HIDDEN = 'Author hidden'
+
 const emptyForm: DraftForm = {
   id: null,
   slug: '',
@@ -864,9 +867,12 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
       const content_hash = await computeLuaContentHash(lua_source)
       const tags = dedupeTags(form.tags)
       if (form.id) {
+        const rejected_reason =
+          targetStatus === 'rejected' ? SCRIPT_REJECTED_REASON_AUTHOR_HIDDEN : null
         const { error, data: updated } = await supabase.from(SCRIPT_TABLE[activeGame]).update({
           slug: form.slug.trim(), title: form.title.trim(), filename: form.filename.trim(),
           status: targetStatus,
+          rejected_reason,
           content_version: contentVersion,
           content_hash,
           description: form.description.trim() || null, category: form.category.trim() || null,
@@ -891,13 +897,17 @@ function AuthorStudio({ onOpenInstalledLibrary }: { onOpenInstalledLibrary?: () 
           }
         }
       } else {
+        const rejected_reason =
+          targetStatus === 'rejected' ? SCRIPT_REJECTED_REASON_AUTHOR_HIDDEN : null
         const { data, error } = await supabase.from(SCRIPT_TABLE[activeGame]).insert({
           slug: form.slug.trim(), title: form.title.trim(), filename: form.filename.trim(),
           content_version: contentVersion,
           content_hash,
           description: form.description.trim() || null, category: form.category.trim() || null,
           tags, changelog: form.changelog.trim() || null, lua_source,
-          status: targetStatus, author_id: user.id,
+          status: targetStatus,
+          rejected_reason,
+          author_id: user.id,
         }).select('id,status').single()
         if (error) {
           addToast(userFacingMessage(error), 'error')

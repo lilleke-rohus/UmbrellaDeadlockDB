@@ -107,12 +107,96 @@ function SkeletonRow(): React.ReactElement {
 }
 
 function formatUpdated(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-  } catch {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) {
     return iso
   }
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function isSortMode(value: string): value is SortMode {
+  return value === 'newest' || value === 'oldest' || value === 'az' || value === 'za'
+}
+
+const SKELETON_KEYS = [1, 2, 3, 4, 5, 6] as const
+
+type CatalogViewProps = {
+  scripts: CatalogItem[]
+  highlightIds: Set<string>
+}
+
+function CatalogGrid({ scripts, highlightIds }: CatalogViewProps): React.ReactElement {
+  return (
+    <div className="card-grid fade-in" aria-label="Scripts">
+      {scripts.map((s) => (
+        <Link
+          key={s.id}
+          to={`/script/${s.slug}`}
+          className={`script-card${highlightIds.has(s.id) ? ' script-card-has-update' : ''}`}
+        >
+          <div className="card-header">
+            <div className="card-icon">
+              <IconScriptTile />
+            </div>
+            <span className="card-badge">v{s.content_version}</span>
+          </div>
+          <div className="card-name">{s.title}</div>
+          <div className="card-author">by {s.author_display_name ?? 'Author'}</div>
+          <div className="card-desc line-clamp">{stripMarkdown(s.description) || 'No description.'}</div>
+          {s.tags && s.tags.length > 0 && (
+            <div className="card-tags">
+              {s.tags.slice(0, 5).map((t) => (
+                <span key={t} className="tag">
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="card-footer">
+            <div className="card-meta">
+              <span className="meta-item">Updated {formatUpdated(s.updated_at)}</span>
+              <span className="meta-item">{s.install_count ?? 0} installs</span>
+            </div>
+            <span className="install-btn">Open</span>
+          </div>
+        </Link>
+      ))}
+    </div>
+  )
+}
+
+function CatalogList({ scripts, highlightIds }: CatalogViewProps): React.ReactElement {
+  return (
+    <div className="row-list fade-in" aria-label="Scripts">
+      {scripts.map((s) => (
+        <Link
+          key={s.id}
+          to={`/script/${s.slug}`}
+          className={`script-row${highlightIds.has(s.id) ? ' script-row-has-update' : ''}`}
+        >
+          <div className="row-icon">
+            <IconRowScript />
+          </div>
+          <div className="row-info">
+            <div className="row-name">{s.title}</div>
+            <div className="row-desc line-clamp">
+              {stripMarkdown(s.description) || 'No description.'} · by {s.author_display_name ?? 'Author'}
+            </div>
+          </div>
+          <div className="row-right">
+            {s.tags?.slice(0, 3).map((t) => (
+              <span key={t} className="tag">
+                {t}
+              </span>
+            ))}
+            <span className="meta-item muted">v{s.content_version}</span>
+            <span className="meta-item">{s.install_count ?? 0} installs</span>
+            <span className="install-btn">Open</span>
+          </div>
+        </Link>
+      ))}
+    </div>
+  )
 }
 
 export function HomePage(): React.ReactElement {
@@ -191,7 +275,10 @@ export function HomePage(): React.ReactElement {
           <select
             className="admin-select"
             value={sort}
-            onChange={(e) => setSort(e.target.value as SortMode)}
+            onChange={(e) => {
+              const value = e.target.value
+              if (isSortMode(value)) setSort(value)
+            }}
             aria-label="Sort by"
           >
             {SORT_OPTIONS.map((option) => (
@@ -234,79 +321,17 @@ export function HomePage(): React.ReactElement {
       {loading && !items.length ? (
         storeView === 'grid' ? (
           <div className="card-grid" aria-busy="true">
-            {[1, 2, 3, 4, 5, 6].map((i) => <SkeletonCard key={i} />)}
+            {SKELETON_KEYS.map((i) => <SkeletonCard key={i} />)}
           </div>
         ) : (
           <div className="row-list" aria-busy="true">
-            {[1, 2, 3, 4, 5, 6].map((i) => <SkeletonRow key={i} />)}
+            {SKELETON_KEYS.map((i) => <SkeletonRow key={i} />)}
           </div>
         )
       ) : storeView === 'grid' ? (
-        <div className="card-grid fade-in" aria-label="Scripts">
-          {sorted.map((s) => (
-            <Link
-              key={s.id}
-              to={`/script/${s.slug}`}
-              className={`script-card${catalogUpdateIds.has(s.id) ? ' script-card-has-update' : ''}`}
-            >
-              <div className="card-header">
-                <div className="card-icon">
-                  <IconScriptTile />
-                </div>
-                <span className="card-badge">v{s.content_version}</span>
-              </div>
-              <div className="card-name">{s.title}</div>
-              <div className="card-author">by {s.author_display_name ?? 'Author'}</div>
-              <div className="card-desc line-clamp">{stripMarkdown(s.description) || 'No description.'}</div>
-              {s.tags && s.tags.length > 0 && (
-                <div className="card-tags">
-                  {s.tags.slice(0, 5).map((t) => (
-                    <span key={t} className="tag">
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="card-footer">
-                <div className="card-meta">
-                  <span className="meta-item">Updated {formatUpdated(s.updated_at)}</span>
-                  <span className="meta-item">{s.install_count ?? 0} installs</span>
-                </div>
-                <span className="install-btn">Open</span>
-              </div>
-            </Link>
-          ))}
-        </div>
+        <CatalogGrid scripts={sorted} highlightIds={catalogUpdateIds} />
       ) : (
-        <div className="row-list fade-in" aria-label="Scripts">
-          {sorted.map((s) => (
-            <Link
-              key={s.id}
-              to={`/script/${s.slug}`}
-              className={`script-row${catalogUpdateIds.has(s.id) ? ' script-row-has-update' : ''}`}
-            >
-              <div className="row-icon">
-                <IconRowScript />
-              </div>
-              <div className="row-info">
-                <div className="row-name">{s.title}</div>
-                <div className="row-desc line-clamp">
-                  {stripMarkdown(s.description) || 'No description.'} · by {s.author_display_name ?? 'Author'}
-                </div>
-              </div>
-              <div className="row-right">
-                {s.tags?.slice(0, 3).map((t) => (
-                  <span key={t} className="tag">
-                    {t}
-                  </span>
-                ))}
-                <span className="meta-item muted">v{s.content_version}</span>
-                <span className="meta-item">{s.install_count ?? 0} installs</span>
-                <span className="install-btn">Open</span>
-              </div>
-            </Link>
-          ))}
-        </div>
+        <CatalogList scripts={sorted} highlightIds={catalogUpdateIds} />
       )}
 
       {!loading && !sorted.length && (

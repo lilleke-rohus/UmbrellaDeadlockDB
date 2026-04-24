@@ -14,8 +14,6 @@ import { MarkdownView } from '../components/MarkdownView'
 const SCRIPT_TABLE = { deadlock: 'scripts', dota2: 'dota2_scripts' } as const
 const CHANGELOG_TABLE = { deadlock: 'script_changelog', dota2: 'dota2_script_changelog' } as const
 const INSTALL_COUNT_RPC = { deadlock: 'increment_install_count', dota2: 'increment_dota2_install_count' } as const
-const SCRIPTS_ROOT_KEY = { deadlock: 'scriptsRootPath', dota2: 'dota2ScriptsRootPath' } as const
-
 type ChangelogEntry = { id: string; version: number; body: string; created_at: string }
 
 function formatDate(iso: string): string {
@@ -155,8 +153,8 @@ export function ScriptDetailPage(): React.ReactElement {
     setBusy(true)
     try {
       const settings = await window.umbrella.getSettings()
-      if (!settings[SCRIPTS_ROOT_KEY[activeGame]]) {
-        addToast('Choose a scripts folder in Settings first.', 'error')
+      if (!settings.umbrellaRootPath) {
+        addToast('Choose your Umbrella folder in Settings first.', 'error')
         return
       }
       let source = luaSource

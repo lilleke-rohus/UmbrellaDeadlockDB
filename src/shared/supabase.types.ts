@@ -28,7 +28,6 @@ export type ProfileRow = {
   id: string
   display_name: string | null
   role: ProfileRole
-  /** Present after migration `20260415100000_admin_and_coauthors`; treat missing as false. */
   verified_developer?: boolean
   author_blocked?: boolean
   author_blocked_reason?: string | null

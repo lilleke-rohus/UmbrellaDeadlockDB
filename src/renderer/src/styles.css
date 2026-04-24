@@ -1,8 +1,4 @@
-﻿/* ──────────────────────────────────────────────────────────
-   FONT TRIAL — easy to remove if you don't like it.
-   Delete this whole block + the `font-family` overrides at
-   the bottom (search for "FONT TRIAL — overrides") to revert.
-   ────────────────────────────────────────────────────────── */
+
 @font-face {
   font-family: 'Valve Pulp';
   src: url('../../public/fonts/valvepulp-bold.ttf') format('truetype');
@@ -258,6 +254,12 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.titlebar-launch-btn {
+  -webkit-app-region: no-drag;
+  margin-right: 8px;
+  flex-shrink: 0;
 }
 
 /* Window control buttons */
@@ -614,6 +616,9 @@ select {
 }
 
 .btn-primary:hover:not(:disabled) {
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-secondary);
   opacity: 0.88;
 }
 
@@ -2161,6 +2166,45 @@ div.changelog ul, div.changelog ol, div.changelog blockquote {
 
 .auth-shell-foot + .auth-shell-foot {
   margin-top: 8px;
+}
+
+.onboarding-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.onboarding-progress-dots {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.onboarding-preview-frame {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.onboarding-preview-image {
+  display: block;
+  width: 183px;
+  height: auto;
+  border-radius: 6px;
+}
+
+.onboarding-progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-border-secondary);
+  transition: background 0.15s ease;
+}
+
+.onboarding-progress-dot.is-active {
+  background: var(--color-text-primary);
 }
 
 @media (max-width: 599px) {

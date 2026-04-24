@@ -247,6 +247,15 @@ function SkipToMainLink(): ReactElement {
 
 function TitleBar(): ReactElement {
   const { activeGame } = useGame()
+  const { addToast } = useToast()
+
+  async function handleLaunchLoader(): Promise<void> {
+    const result = await window.umbrella.launchLoader()
+    if (!result.ok) {
+      addToast(result.error ?? 'Failed to launch loader', 'error')
+    }
+  }
+
   return (
     <div className="titlebar">
       <div className="titlebar-drag">
@@ -255,6 +264,14 @@ function TitleBar(): ReactElement {
         </div>
         <span className="titlebar-app-name">{APP_DISPLAY_NAME}</span>
       </div>
+      <button
+        type="button"
+        className="btn btn-primary btn-compact titlebar-launch-btn"
+        onClick={() => void handleLaunchLoader()}
+        title="Launch UmbrellaLoader.exe"
+      >
+        Start Loader
+      </button>
       <WinControls />
     </div>
   )

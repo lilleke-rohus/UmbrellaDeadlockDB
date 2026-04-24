@@ -16,6 +16,26 @@ import {
 import type { ManifestEntry } from '../shared/ipc'
 
 const { autoUpdater } = electronUpdater
+const LOADER_EXECUTABLE_NAME = 'UmbrellaLoader.exe'
+const GAME_SCRIPTS_DIR = {
+  deadlock: ['deadlock-scripts', 'deadlock_scripts'],
+  dota2: ['dota', 'scripts'],
+} as const
+
+function isAllowedExternalUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    const p = u.protocol.toLowerCase()
+    return (
+      p === 'http:' ||
+      p === 'https:' ||
+      p === 'mailto:' ||
+      p === `${APP_AUTH_PROTOCOL_SCHEME}:`
+    )
+  } catch {
+    return false
+  }
+}
 
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
@@ -208,6 +228,28 @@ function createWindow(): BrowserWindow {
   } else {
     void win.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url === win.webContents.getURL()) return
+    try {
+      const u = new URL(url)
+      if (u.protocol === 'file:') return
+    } catch {
+      return
+    }
+    event.preventDefault()
+    if (isAllowedExternalUrl(url)) {
+      void shell.openExternal(url)
+    }
+  })
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) {
+      void shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+
   return win
 }
 
@@ -223,6 +265,32 @@ function ensureScriptsRoot(root: string): { ok: true } | { ok: false; error: str
   }
 }
 
+function resolveGameScriptsRoot(game: 'deadlock' | 'dota2'): string | null {
+  const settings = readSettings()
+  const umbrellaRoot = settings.umbrellaRootPath
+  if (!umbrellaRoot) {
+    return null
+  }
+  for (const folder of GAME_SCRIPTS_DIR[game]) {
+    const candidate = path.join(umbrellaRoot, folder)
+    if (existsSync(candidate)) {
+      return candidate
+    }
+  }
+  return path.join(umbrellaRoot, GAME_SCRIPTS_DIR[game][0])
+}
+
+function normalizeScriptsFolderError(error: unknown): string {
+  const err = error as NodeJS.ErrnoException
+  if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
+    return 'No Umbrella folder found. Set it up in Settings.'
+  }
+  if (error instanceof Error) {
+    return error.message
+  }
+  return String(error)
+}
+
 app.whenReady().then(() => {
   if (!gotTheLock) {
     return
@@ -230,7 +298,24 @@ app.whenReady().then(() => {
 
   ipcMain.handle(IPC_CHANNELS.getSettings, () => readSettings())
 
-  ipcMain.handle(IPC_CHANNELS.updateSettings, (_e, patch: Partial<{ scriptsRootPath: string | null; autoUpdateScripts: boolean }>) => {
+  ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_e, raw: unknown) => {
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return { ok: false, error: 'Invalid URL' }
+    }
+    const url = raw.trim()
+    if (!isAllowedExternalUrl(url)) {
+      return { ok: false, error: 'URL not allowed' }
+    }
+    try {
+      await shell.openExternal(url)
+      return { ok: true }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { ok: false, error: msg }
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.updateSettings, (_e, patch: Partial<{ umbrellaRootPath: string | null; autoUpdateScripts: boolean }>) => {
     try {
       const current = readSettings()
       writeSettings({ ...current, ...patch })
@@ -241,7 +326,7 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.setScriptsRoot, (_e, rootPath: string) => {
+  ipcMain.handle(IPC_CHANNELS.setUmbrellaRoot, (_e, rootPath: string) => {
     if (typeof rootPath !== 'string' || !rootPath.trim()) {
       return { ok: false, error: 'Invalid path' }
     }
@@ -250,20 +335,7 @@ app.whenReady().then(() => {
       return ensured
     }
     const current = readSettings()
-    writeSettings({ ...current, scriptsRootPath: rootPath.trim() })
-    return { ok: true }
-  })
-
-  ipcMain.handle(IPC_CHANNELS.setDota2ScriptsRoot, (_e, rootPath: string) => {
-    if (typeof rootPath !== 'string' || !rootPath.trim()) {
-      return { ok: false, error: 'Invalid path' }
-    }
-    const ensured = ensureScriptsRoot(rootPath.trim())
-    if (!ensured.ok) {
-      return ensured
-    }
-    const current = readSettings()
-    writeSettings({ ...current, dota2ScriptsRootPath: rootPath.trim() })
+    writeSettings({ ...current, umbrellaRootPath: rootPath.trim() })
     return { ok: true }
   })
 
@@ -300,8 +372,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle(IPC_CHANNELS.listLocalScripts, (_e, game = 'deadlock') => {
-    const settings = readSettings()
-    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    const root = resolveGameScriptsRoot(game)
     if (!root) {
       return { names: [] as string[], error: 'Scripts folder not configured' }
     }
@@ -309,14 +380,12 @@ app.whenReady().then(() => {
       const names = readdirSync(root).filter((n) => n.toLowerCase().endsWith('.lua'))
       return { names }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      return { names: [] as string[], error: msg }
+      return { names: [] as string[], error: normalizeScriptsFolderError(e) }
     }
   })
 
   ipcMain.handle(IPC_CHANNELS.readLocalScript, (_e, filename: string, game = 'deadlock') => {
-    const settings = readSettings()
-    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    const root = resolveGameScriptsRoot(game)
     if (!root) {
       return { content: null, error: 'Scripts folder not configured' }
     }
@@ -334,14 +403,12 @@ app.whenReady().then(() => {
       const content = readFileSync(full, 'utf-8')
       return { content }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      return { content: null, error: msg }
+      return { content: null, error: normalizeScriptsFolderError(e) }
     }
   })
 
   ipcMain.handle(IPC_CHANNELS.writeScript, (_e, filename: string, contents: string, game = 'deadlock') => {
-    const settings = readSettings()
-    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    const root = resolveGameScriptsRoot(game)
     if (!root) {
       return { ok: false, error: 'Scripts folder not configured' }
     }
@@ -364,14 +431,12 @@ app.whenReady().then(() => {
       writeFileSync(full, contents, 'utf-8')
       return { ok: true }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      return { ok: false, error: msg }
+      return { ok: false, error: normalizeScriptsFolderError(e) }
     }
   })
 
   ipcMain.handle(IPC_CHANNELS.deleteScript, (_e, filename: string, game = 'deadlock') => {
-    const settings = readSettings()
-    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    const root = resolveGameScriptsRoot(game)
     if (!root) {
       return { ok: false, error: 'Scripts folder not configured' }
     }
@@ -388,8 +453,7 @@ app.whenReady().then(() => {
       }
       return { ok: true }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      return { ok: false, error: msg }
+      return { ok: false, error: normalizeScriptsFolderError(e) }
     }
   })
 
@@ -415,8 +479,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle(IPC_CHANNELS.revealInExplorer, (_e, filename?: string, game = 'deadlock') => {
-    const settings = readSettings()
-    const root = game === 'dota2' ? settings.dota2ScriptsRootPath : settings.scriptsRootPath
+    const root = resolveGameScriptsRoot(game)
     if (!root) {
       return { ok: false, error: 'Scripts folder not configured' }
     }
@@ -429,6 +492,27 @@ app.whenReady().then(() => {
         void shell.showItemInFolder(full)
       } else {
         void shell.openPath(root)
+      }
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: normalizeScriptsFolderError(e) }
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.launchLoader, async () => {
+    const settings = readSettings()
+    const umbrellaRoot = settings.umbrellaRootPath
+    if (!umbrellaRoot) {
+      return { ok: false, error: 'Umbrella folder not configured' }
+    }
+    const loaderPath = path.join(umbrellaRoot, LOADER_EXECUTABLE_NAME)
+    if (!existsSync(loaderPath)) {
+      return { ok: false, error: `${LOADER_EXECUTABLE_NAME} not found at ${loaderPath}` }
+    }
+    try {
+      const openError = await shell.openPath(loaderPath)
+      if (openError) {
+        return { ok: false, error: openError }
       }
       return { ok: true }
     } catch (e) {
