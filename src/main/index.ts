@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import electronUpdater from 'electron-updater'
@@ -377,7 +377,10 @@ app.whenReady().then(() => {
       return { names: [] as string[], error: 'Scripts folder not configured' }
     }
     try {
-      const names = readdirSync(root).filter((n) => n.toLowerCase().endsWith('.lua'))
+      const names = readdirSync(root).filter((n) => {
+        const lower = n.toLowerCase()
+        return lower.endsWith('.lua') || lower.endsWith('.lua.disabled')
+      })
       return { names }
     } catch (e) {
       return { names: [] as string[], error: normalizeScriptsFolderError(e) }
@@ -454,6 +457,35 @@ app.whenReady().then(() => {
       return { ok: true }
     } catch (e) {
       return { ok: false, error: normalizeScriptsFolderError(e) }
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.toggleScriptEnabled, (_e, filename: string, enable: boolean, game = 'deadlock') => {
+    const root = resolveGameScriptsRoot(game)
+    if (!root) {
+      return { ok: false, error: 'Scripts folder not configured' }
+    }
+    if (typeof filename !== 'string') {
+      return { ok: false, error: 'Invalid filename' }
+    }
+    const base = path.basename(filename)
+    const luaName = base.endsWith('.lua.disabled') ? base.slice(0, -'.disabled'.length) : base
+    const fromName = enable ? luaName + '.disabled' : luaName
+    const toName = enable ? luaName : luaName + '.disabled'
+    const fromPath = resolveUnderRoot(root, fromName)
+    const toPath = resolveUnderRoot(root, toName)
+    if (!fromPath || !toPath) {
+      return { ok: false, error: 'Path not allowed' }
+    }
+    try {
+      if (!existsSync(fromPath)) {
+        return { ok: true }
+      }
+      renameSync(fromPath, toPath)
+      return { ok: true }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { ok: false, error: msg }
     }
   })
 

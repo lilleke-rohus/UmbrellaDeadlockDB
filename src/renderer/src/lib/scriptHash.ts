@@ -12,6 +12,7 @@ export type LocalLuaScript = {
   content: string
   hash: string
   header: { version: number; iso: string } | null
+  fileDisabled: boolean
 }
 
 export type LocalLuaScanResult = {
@@ -36,7 +37,8 @@ export type HashCheckSummary = {
 const localHashCache = new Map<string, { content: string; hash: string }>()
 
 export function normalizeFilename(filename: string): string {
-  return filename.trim().toLowerCase()
+  const lower = filename.trim().toLowerCase()
+  return lower.endsWith('.lua.disabled') ? lower.slice(0, -'.disabled'.length) : lower
 }
 
 export function normalizeLuaForHash(luaSource: string): string {
@@ -70,6 +72,7 @@ async function readLocalScriptWithHash(filename: string, game: ActiveGame): Prom
     content: readResult.content,
     hash,
     header: parseUmbrellaHeader(readResult.content),
+    fileDisabled: filename.toLowerCase().endsWith('.lua.disabled'),
   }
 }
 
@@ -82,7 +85,10 @@ export async function scanLocalLuaScriptsWithHashes(
     return { scripts: [], error: listed.error }
   }
   const names = listed.names
-    .filter((name) => name.toLowerCase().endsWith('.lua'))
+    .filter((name) => {
+      const lower = name.toLowerCase()
+      return lower.endsWith('.lua') || lower.endsWith('.lua.disabled')
+    })
     .map((name) => name.trim())
     .filter((name) => name.length > 0)
   const scripts: LocalLuaScript[] = []

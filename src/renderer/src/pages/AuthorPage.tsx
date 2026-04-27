@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useGame } from '../context/GameContext'
 import { parseUmbrellaHeader, stripFirstLine } from '../lib/firstLine'
@@ -238,6 +238,7 @@ type InstalledEntry = {
   needsCatalogUpdate: boolean
   external: boolean
   removedFromStore: boolean
+  fileDisabled: boolean
 }
 
 function createReadableTitleFromFilename(filename: string): string {
@@ -308,6 +309,7 @@ async function loadInstalledScripts(localFiles: LocalLuaScript[], game: ActiveGa
       needsCatalogUpdate,
       external: hashMismatchesCatalog && !hashMatchesCatalog,
       removedFromStore: !meta,
+      fileDisabled: localFile.fileDisabled,
     })
     consumedLocalFilenames.add(localFile.normalizedFilename)
   }
@@ -320,11 +322,12 @@ async function loadInstalledScripts(localFiles: LocalLuaScript[], game: ActiveGa
     const catalogCandidates = catalogByNormalizedFilename.get(localFile.normalizedFilename) ?? []
     const catalogMatch = catalogCandidates[0]
     if (!catalogMatch) {
+      const luaFilename = localFile.filename.replace(/\.disabled$/i, '')
       inferredFromLocalFiles.push({
-        scriptId: `external:unknown:${localFile.filename}`,
-        entryKey: `external:unknown:${localFile.filename}`,
-        filename: localFile.filename,
-        title: createReadableTitleFromFilename(localFile.filename),
+        scriptId: `external:unknown:${luaFilename}`,
+        entryKey: `external:unknown:${luaFilename}`,
+        filename: luaFilename,
+        title: createReadableTitleFromFilename(luaFilename),
         description: null,
         slug: null,
         contentVersion: localFile.header?.version ?? 0,
@@ -332,6 +335,7 @@ async function loadInstalledScripts(localFiles: LocalLuaScript[], game: ActiveGa
         needsCatalogUpdate: false,
         external: true,
         removedFromStore: false,
+        fileDisabled: localFile.fileDisabled,
       })
       continue
     }
@@ -342,10 +346,11 @@ async function loadInstalledScripts(localFiles: LocalLuaScript[], game: ActiveGa
     const hashMatched = Boolean(catalogMatch.content_hash && localFile.hash === catalogMatch.content_hash)
     const hashMismatched = Boolean(catalogMatch.content_hash && localFile.hash !== catalogMatch.content_hash)
     const upToDate = hashMatched || (inferredManifestEntry ? !shouldUpdate(inferredManifestEntry, catalogMatch) : false)
+    const luaFilename = localFile.filename.replace(/\.disabled$/i, '')
     inferredFromLocalFiles.push({
-      scriptId: upToDate ? catalogMatch.id : `external:${catalogMatch.id}:${localFile.filename}`,
-      entryKey: upToDate ? catalogMatch.id : `external:${catalogMatch.id}:${localFile.filename}`,
-      filename: localFile.filename,
+      scriptId: upToDate ? catalogMatch.id : `external:${catalogMatch.id}:${luaFilename}`,
+      entryKey: upToDate ? catalogMatch.id : `external:${catalogMatch.id}:${luaFilename}`,
+      filename: luaFilename,
       title: catalogMatch.title,
       description: catalogMatch.description,
       slug: catalogMatch.slug,
@@ -354,6 +359,7 @@ async function loadInstalledScripts(localFiles: LocalLuaScript[], game: ActiveGa
       needsCatalogUpdate: hashMismatched || !upToDate,
       external: hashMismatched || !upToDate,
       removedFromStore: false,
+      fileDisabled: localFile.fileDisabled,
     })
   }
 
@@ -415,6 +421,37 @@ function SkeletonLibrary({ count = 4, view = 'grid' }: { count?: number; view?: 
   )
 }
 
+function IcoUpdateArrow(): React.ReactElement {
+  return (
+    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 5.5A3.5 3.5 0 1 1 7 2.2"/>
+      <path d="M7 1v2.5h2.5"/>
+    </svg>
+  )
+}
+
+function IcoTrash(): React.ReactElement {
+  return (
+    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 3h8M3.5 3V2h4v1"/>
+      <path d="M2 3l.6 6.5a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9L9 3"/>
+    </svg>
+  )
+}
+
+function LibToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className={`toggle-btn ${on ? 'on' : 'off'}`}
+      onClick={(e) => { e.stopPropagation(); onChange(!on); }}
+      aria-label={on ? 'Disable script' : 'Enable script'}
+    >
+      <div className="toggle-btn-thumb" />
+    </button>
+  )
+}
+
 function InstalledLibraryView({
   showSignedInCopy = false,
   onOpenAuthorStudio,
@@ -422,14 +459,24 @@ function InstalledLibraryView({
   showSignedInCopy?: boolean
   onOpenAuthorStudio?: () => void
 } = {}): React.ReactElement {
-  const { librarySearch, libraryView } = useOutletContext<VaultOutletContext>()
+  const { librarySearch } = useOutletContext<VaultOutletContext>()
   const { addToast } = useToast()
   const { activeGame } = useGame()
   const [entries, setEntries] = useState<InstalledEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [scanError, setScanError] = useState<string | null>(null)
-  const [checkingHashes, setCheckingHashes] = useState(false)
-  const [hashProgress, setHashProgress] = useState<{ done: number; total: number } | null>(null)
+  const navigate = useNavigate()
+
+  async function toggleEnabled(entry: InstalledEntry): Promise<void> {
+    const result = await window.umbrella.toggleScriptEnabled(entry.filename, entry.fileDisabled, activeGame)
+    if (!result.ok) {
+      addToast(result.error ?? 'Failed to toggle script', 'error')
+      return
+    }
+    setEntries((prev) =>
+      prev.map((e) => e.entryKey === entry.entryKey ? { ...e, fileDisabled: !e.fileDisabled } : e)
+    )
+  }
 
   const reloadEntries = useCallback(async () => {
     setLoading(true)
@@ -445,29 +492,6 @@ function InstalledLibraryView({
       setLoading(false)
     }
   }, [activeGame])
-
-  const checkHashUpdates = useCallback(async () => {
-    if (checkingHashes) return
-    setCheckingHashes(true)
-    setHashProgress({ done: 0, total: 0 })
-    addToast('Checking local script hashes…')
-    try {
-      const localScan = await loadLocalLuaFiles((progress) => setHashProgress(progress), activeGame)
-      if (localScan.error) {
-        addToast(localScan.error, 'error')
-        return
-      }
-      const catalogRows = await loadCachedCatalog(activeGame)
-      const summary = summarizeHashCheckAgainstCatalog(localScan.files, catalogRows)
-      addToast(
-        `Hash check: ${summary.current} current, ${summary.outdated} need update, ${summary.missingHash} missing hash, ${summary.unknown} not in store.`,
-        summary.outdated > 0 ? 'info' : 'success',
-      )
-      await reloadEntries()
-    } finally {
-      setCheckingHashes(false)
-    }
-  }, [activeGame, addToast, checkingHashes, reloadEntries])
 
   useEffect(() => {
     void reloadEntries()
@@ -490,137 +514,106 @@ function InstalledLibraryView({
         ? `${filtered.length} of ${entries.length} scripts`
         : `${entries.length} script${entries.length === 1 ? '' : 's'} installed`
 
+  const updatesCount = entries.filter((e) => e.needsCatalogUpdate).length
+
   return (
     <div className="page author-page">
-      <p className="store-lead muted">
-        {showSignedInCopy
-          ? 'Scripts installed on this machine. Compare local files with store versions and update as needed.'
-          : 'Scripts installed on this machine. Sign in to access the author studio.'}
-      </p>
-
-      <div className="section-header">
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span className="section-title">Installed scripts</span>
+      {/* Library header bar */}
+      <div className="lib-header-bar">
+        <div className="lib-header-left">
+          <span className="section-title" aria-live="polite">
+            {loading ? 'Loading…' : summary}
+          </span>
           {onOpenAuthorStudio && (
             <button type="button" className="btn btn-compact" onClick={onOpenAuthorStudio}>
               Author studio
             </button>
           )}
+          {updatesCount > 0 && (
+            <span className="lib-updates-badge">
+              <IcoUpdateArrow /> {updatesCount} update{updatesCount > 1 ? 's' : ''} available
+            </span>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span className="section-count" aria-live="polite">
-            {loading ? 'Loading…' : summary}
-          </span>
+        <div style={{ display: 'flex', gap: 6 }}>
           <button type="button" className="btn btn-compact" onClick={() => void reloadEntries()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
-          <button
-            type="button"
-            className="btn btn-compact"
-            disabled={loading || checkingHashes}
-            onClick={() => void checkHashUpdates()}
-            title="Compare local hashes against store hashes"
-          >
-            {checkingHashes
-              ? `Checking ${hashProgress?.done ?? 0}/${hashProgress?.total ?? 0}…`
-              : 'Check for updates'}
-          </button>
         </div>
       </div>
+
       {scanError && <p className="error">{scanError}</p>}
 
       {loading ? (
-        libraryView === 'grid' ? (
-          <div className="card-grid" aria-busy="true">
-            {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
-          </div>
-        ) : (
-          <div className="row-list" aria-busy="true">
-            {[1, 2, 3].map((i) => <SkeletonRow key={i} />)}
-          </div>
-        )
-      ) : libraryView === 'grid' ? (
-        <div className="card-grid fade-in" aria-label="Installed scripts">
-          {filtered.map((e) => {
-            const inner = (
-              <>
-                <div className="card-header">
-                  <div className="card-icon"><IconScriptTile /></div>
-                  <div className="card-header-badges">
-                    {e.removedFromStore ? (
-                      <span className="card-badge card-badge-removed">Removed</span>
-                    ) : null}
-                    {e.external ? (
-                      <span className="card-badge card-badge-external">External</span>
-                    ) : null}
-                    <span className="card-badge">v{e.contentVersion}</span>
-                  </div>
-                </div>
-                <div className="card-name">{e.title}</div>
-                <div className="card-author">{e.filename}</div>
-                {e.description && (
-                  <div className="card-desc line-clamp">{e.description}</div>
-                )}
-                <div className="card-footer">
-                  <span className="meta-item">
-                    {e.external ? `On disk · ${relativeDate(e.installedAt)}` : `Installed ${relativeDate(e.installedAt)}`}
-                  </span>
-                </div>
-              </>
-            )
-            const cardClass = `script-card${e.needsCatalogUpdate ? ' script-card-has-update' : ''}`
-            return e.slug ? (
-              <Link key={e.entryKey} to={`/script/${e.slug}`} className={cardClass}>
-                {inner}
-              </Link>
-            ) : (
-              <div key={e.entryKey} className={cardClass}>
-                {inner}
-              </div>
-            )
-          })}
-          {!loading && !filtered.length && (
-            <p className="muted empty-state" style={{ gridColumn: '1/-1' }}>
-              {entries.length ? 'No scripts match your search.' : 'No scripts installed yet.'}
-            </p>
-          )}
+        <div className="row-list" aria-busy="true">
+          {[1, 2, 3].map((i) => <SkeletonRow key={i} />)}
         </div>
       ) : (
-        <div className="row-list fade-in" aria-label="Installed scripts">
-          {filtered.map((e) => {
-            const inner = (
-              <>
-                <div className="row-icon"><IconScriptTile /></div>
-                <div className="row-info">
-                  <div className="row-name">{e.title}</div>
-                  <div className="row-desc">{e.filename}</div>
+        /* ── List view — new lib-row design ── */
+        <div className="fadein" aria-label="Installed scripts">
+          {/* Column headers */}
+          <div className="lib-col-headers">
+            <div aria-hidden />
+            <div aria-hidden />
+            <div className="lib-col-script lib-col-label">Script</div>
+            <div className="lib-col-version lib-col-label">Version</div>
+            <div className="lib-col-active lib-col-label">Active</div>
+            <div className="lib-col-actions lib-col-label">Actions</div>
+          </div>
+
+          {filtered.map((e, i) => {
+            const enabled = !e.fileDisabled
+            return (
+              <div
+                key={e.entryKey}
+                className="lib-row fadeup"
+                style={{ animationDelay: `${i * 20}ms`, cursor: e.slug ? 'pointer' : 'default' }}
+                onClick={() => { if (e.slug) void navigate(`/script/${e.slug}`) }}
+              >
+                <div className={`lib-row-stripe ${enabled ? 'enabled' : 'disabled'}`} />
+                <div className="lib-row-inner">
+                  {/* Icon + title */}
+                  <div className="lib-row-icon"><IconScriptTile /></div>
+                  <div className="lib-row-info">
+                    <div className="lib-row-name-row">
+                      <span className={`lib-row-name${enabled ? '' : ' dimmed'}`}>{e.title}</span>
+                      {e.needsCatalogUpdate && (
+                        <span className="lib-row-update-tag">
+                          <IcoUpdateArrow /> v{e.contentVersion} → newer
+                        </span>
+                      )}
+                      {!enabled && <span className="lib-row-disabled-tag">Disabled</span>}
+                      {e.removedFromStore && <span className="badge" style={{ color: '#f9a8d4', background: 'rgba(190,24,93,.15)', border: '1px solid rgba(244,114,182,.35)', fontSize: '9.5px', fontWeight: 600, padding: '2px 6px', borderRadius: 6, letterSpacing: '.03em', textTransform: 'uppercase' }}>Removed</span>}
+                      {e.external && <span className="badge" style={{ color: '#fdba74', background: 'rgba(234,88,12,.15)', border: '1px solid rgba(249,115,22,.35)', fontSize: '9.5px', fontWeight: 600, padding: '2px 6px', borderRadius: 6, letterSpacing: '.03em', textTransform: 'uppercase' }}>External</span>}
+                    </div>
+                    <div className="lib-row-path">{e.filename}</div>
+                  </div>
+
+                  {/* Version */}
+                  <div className="lib-row-version">v{e.contentVersion}</div>
+
+                  {/* Toggle */}
+                  <div className="lib-row-toggle-col" onClick={(ev) => ev.stopPropagation()}>
+                    <LibToggle on={enabled} onChange={() => void toggleEnabled(e)} />
+                  </div>
+
+                  {/* Actions */}
+                  <div className="lib-row-actions" onClick={(ev) => ev.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="lib-remove-btn"
+                      title="Delete the .lua file from your scripts folder to remove"
+                      onClick={() => addToast(`Delete ${e.filename} from your scripts folder to remove it.`)}
+                    >
+                      <IcoTrash />
+                    </button>
+                  </div>
                 </div>
-                <div className="row-right">
-                  {e.removedFromStore ? (
-                    <span className="card-badge card-badge-removed">Removed</span>
-                  ) : null}
-                  {e.external ? (
-                    <span className="card-badge card-badge-external">External</span>
-                  ) : null}
-                  <span className="meta-item muted">v{e.contentVersion}</span>
-                  <span className="meta-item">
-                    {e.external ? `On disk · ${relativeDate(e.installedAt)}` : `Installed ${relativeDate(e.installedAt)}`}
-                  </span>
-                </div>
-              </>
-            )
-            const rowClass = `script-row${e.needsCatalogUpdate ? ' script-row-has-update' : ''}`
-            return e.slug ? (
-              <Link key={e.entryKey} to={`/script/${e.slug}`} className={rowClass}>
-                {inner}
-              </Link>
-            ) : (
-              <div key={e.entryKey} className={rowClass}>
-                {inner}
               </div>
             )
           })}
-          {!loading && !filtered.length && (
+
+          {!filtered.length && (
             <p className="muted empty-state">
               {entries.length ? 'No scripts match your search.' : 'No scripts installed yet.'}
             </p>

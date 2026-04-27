@@ -42,7 +42,7 @@ const ROLE_OPTIONS: ProfileRole[] = ['reader', 'author', 'moderator', 'admin']
 
 type AdminScriptRow = Pick<
   ScriptRow,
-  'id' | 'slug' | 'title' | 'author_id' | 'status' | 'content_hash' | 'rejected_reason' | 'updated_at'
+  'id' | 'slug' | 'title' | 'author_id' | 'status' | 'content_hash' | 'rejected_reason' | 'updated_at' | 'featured'
 > & {
   author_display_name_override?: string | null
   game: AdminGame
@@ -113,6 +113,7 @@ export function AdminPage(): React.ReactElement {
   const [editCoProfileId, setEditCoProfileId] = useState('')
   const [editOverrideName, setEditOverrideName] = useState('')
 
+  const [scriptSearch, setScriptSearch] = useState('')
   const [setKey, setSetKey] = useState('')
   const [setValueJson, setSetValueJson] = useState('{}')
 
@@ -133,7 +134,7 @@ export function AdminPage(): React.ReactElement {
       return
     }
     const select =
-      'id, slug, title, author_id, status, content_hash, rejected_reason, author_display_name_override, updated_at'
+      'id, slug, title, author_id, status, content_hash, rejected_reason, featured, author_display_name_override, updated_at'
     const [deadRes, dotaRes] = await Promise.all([
       supabase.from('scripts').select(select).order('updated_at', { ascending: false }).limit(500),
       supabase.from('dota2_scripts').select(select).order('updated_at', { ascending: false }).limit(500),
@@ -360,6 +361,29 @@ export function AdminPage(): React.ReactElement {
     })
   }
 
+  async function setFeatured(script: AdminScriptRow, value: boolean): Promise<void> {
+    if (!supabase) return
+    if (value) {
+      const currentFeatured = scripts.filter((s) => s.game === script.game && s.featured)
+      if (currentFeatured.length >= 2) {
+        addToast('Unfeature a script first — max 2 featured per game.', 'error')
+        return
+      }
+    }
+    const client = supabase
+    await runBusyTask(async () => {
+      const { error } = await client
+        .from(SCRIPT_TABLE[script.game])
+        .update({ featured: value })
+        .eq('id', script.id)
+      if (error) {
+        addToast(userFacingMessage(error), 'error')
+        return
+      }
+      await loadScripts()
+    })
+  }
+
   async function upsertSetting(): Promise<void> {
     if (!supabase || !setKey.trim()) {
       return
@@ -444,9 +468,12 @@ export function AdminPage(): React.ReactElement {
 
   const missingHashCount = useMemo(() => scripts.filter((s) => !s.content_hash).length, [scripts])
   const storeManagedScripts = useMemo(() => {
-    const list = scripts.filter((script) => script.status === 'published' || script.status === 'rejected')
+    const q = scriptSearch.trim().toLowerCase()
+    const list = q
+      ? scripts.filter((s) => s.title.toLowerCase().includes(q) || s.slug.toLowerCase().includes(q))
+      : scripts
     return [...list].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-  }, [scripts])
+  }, [scripts, scriptSearch])
   const editingScript = useMemo(
     () =>
       editingScriptRef
@@ -506,12 +533,18 @@ export function AdminPage(): React.ReactElement {
       </section>
 
       <section className="settings-section">
-        <div className="settings-section-title">Store visibility</div>
+        <div className="settings-section-title">Scripts</div>
         <p className="setting-desc" style={{ marginBottom: 12 }}>
-          Hide scripts from the Deadlock or Dota 2 store, republish hidden scripts, delete scripts, and manage store
-          collaborators.
+          Manage visibility, featured status, coauthors, and author overrides. Up to 2 scripts per game can be featured.
         </p>
-        <div className="admin-scroll">
+        <input
+          className="field-input"
+          style={{ marginBottom: 10, width: '100%', maxWidth: 340 }}
+          placeholder="Search by title or slug…"
+          value={scriptSearch}
+          onChange={(e) => setScriptSearch(e.target.value)}
+        />
+        <div className="admin-scroll" style={{ maxHeight: 440, overflowY: 'auto' }}>
           <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
@@ -520,7 +553,6 @@ export function AdminPage(): React.ReactElement {
                   <th>Game</th>
                   <th>Author</th>
                   <th>Status</th>
-                  <th>Reason</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
@@ -528,7 +560,12 @@ export function AdminPage(): React.ReactElement {
                 {storeManagedScripts.map((script) => (
                   <tr key={`${script.game}-${script.id}`}>
                     <td>
-                      <strong>{script.title}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <strong>{script.title}</strong>
+                        {script.featured && (
+                          <span className="badge badge-featured" style={{ fontSize: 9 }}>Featured</span>
+                        )}
+                      </div>
                     </td>
                     <td className="small">{gameLabel(script.game)}</td>
                     <td className="small">
@@ -542,7 +579,6 @@ export function AdminPage(): React.ReactElement {
                         {SCRIPT_STATUS_LABEL[script.status]}
                       </span>
                     </td>
-                    <td className="small muted">{script.rejected_reason ?? '—'}</td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
                         <button
@@ -561,9 +597,7 @@ export function AdminPage(): React.ReactElement {
                             setEditOverrideName(script.author_display_name_override ?? '')
                           }}
                         >
-                          {editingScriptRef?.game === script.game && editingScriptRef?.id === script.id
-                            ? 'Close edit'
-                            : 'Edit'}
+                          Edit
                         </button>
                         {script.status === 'published' ? (
                           <button type="button" className="btn" disabled={busy} onClick={() => void hideScript(script)}>
@@ -590,7 +624,9 @@ export function AdminPage(): React.ReactElement {
             </table>
           </div>
         </div>
-        {!storeManagedScripts.length && <p className="muted">No published or hidden scripts.</p>}
+        {!storeManagedScripts.length && (
+          <p className="muted">{scriptSearch ? 'No scripts match your search.' : 'No scripts yet.'}</p>
+        )}
       </section>
 
       <Modal
@@ -606,9 +642,25 @@ export function AdminPage(): React.ReactElement {
       >
         {editingScript && (
           <>
-            <p className="setting-desc" style={{ marginBottom: 12 }}>
-              Manage coauthors and author display override for this script.
-            </p>
+            <div className="setting-block" style={{ marginBottom: 16 }}>
+              <div className="setting-label" style={{ marginBottom: 6 }}>Featured</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="muted small">
+                  {editingScript.featured
+                    ? 'This script is currently featured in the store.'
+                    : 'Feature this script to highlight it at the top of the store (max 2 per game).'}
+                </span>
+                <button
+                  type="button"
+                  className={`btn btn-compact${editingScript.featured ? '' : ' btn-primary'}`}
+                  disabled={busy}
+                  onClick={() => void setFeatured(editingScript, !editingScript.featured)}
+                >
+                  {editingScript.featured ? 'Unfeature' : 'Feature'}
+                </button>
+              </div>
+            </div>
+
             <div className="setting-block">
               <div className="row gap wrap" style={{ alignItems: 'flex-end', width: '100%' }}>
                 <label className="field grow" style={{ marginBottom: 0, flex: '1 1 220px' }}>
