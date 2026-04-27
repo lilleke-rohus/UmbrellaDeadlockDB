@@ -1,6 +1,6 @@
 {
   "name": "umbrella-deadlock-db",
-  "version": "0.1.15",
+  "version": "0.2.01",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
