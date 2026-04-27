@@ -32,6 +32,7 @@ export const IPC_CHANNELS = {
   authDeepLink: 'umbrella:auth-deep-link',
   getPendingAuthDeepLink: 'umbrella:get-pending-auth-deep-link',
   launchLoader: 'umbrella:launch-loader',
+  toggleScriptEnabled: 'umbrella:toggle-script-enabled',
 } as const
 
 export type ActiveGame = 'deadlock' | 'dota2'
@@ -95,4 +96,5 @@ export type IpcApi = {
   getPendingAuthDeepLink: () => Promise<string | null>
   onAuthDeepLink: (handler: (url: string) => void) => () => void
   launchLoader: () => Promise<{ ok: boolean; error?: string }>
+  toggleScriptEnabled: (filename: string, enable: boolean, game?: ActiveGame) => Promise<{ ok: boolean; error?: string }>
 }

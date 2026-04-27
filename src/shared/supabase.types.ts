@@ -21,6 +21,7 @@ export type ScriptRow = {
   author_id: string
   changelog: string | null
   install_count: number
+  featured: boolean
   author_display_name_override?: string | null
 }
 

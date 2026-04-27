@@ -39,7 +39,7 @@ export function useCatalog(game: ActiveGame = 'deadlock'): {
       const { data, error: qErr } = await supabase
         .from(table)
         .select(
-          'id, slug, title, description, category, tags, filename, status, content_version, content_hash, updated_at, published_at, author_id, install_count, author_display_name_override, author:profiles!author_id(display_name)'
+          'id, slug, title, description, category, tags, filename, status, content_version, content_hash, updated_at, published_at, author_id, install_count, featured, author_display_name_override, author:profiles!author_id(display_name)'
         )
         .eq('status', 'published')
         .order('updated_at', { ascending: false })
@@ -67,6 +67,7 @@ export function useCatalog(game: ActiveGame = 'deadlock'): {
           author_id: row.author_id as string,
           author_display_name: (row.author_display_name_override as string | null) ?? authorJoin?.display_name ?? null,
           install_count: (row.install_count as number) ?? 0,
+          featured: (row.featured as boolean) ?? false,
           author_display_name_override: (row.author_display_name_override as string | null) ?? null,
         }
       })

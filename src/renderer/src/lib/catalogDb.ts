@@ -17,6 +17,7 @@ export type CachedScriptMeta = {
   author_id: string
   author_display_name: string | null
   install_count: number
+  featured: boolean
   author_display_name_override?: string | null
 }
 
@@ -34,6 +35,10 @@ class CatalogDB extends Dexie {
     })
     this.version(2).stores({
       scripts: 'id, slug, title, category, updated_at, *tags',
+      syncMeta: 'id',
+    })
+    this.version(3).stores({
+      scripts: 'id, slug, title, category, updated_at, *tags, featured',
       syncMeta: 'id',
     })
   }

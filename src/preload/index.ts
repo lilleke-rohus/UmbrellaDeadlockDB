@@ -46,6 +46,7 @@ const api: IpcApi = {
   onAuthDeepLink: (handler) => subscribe<string>(IPC_CHANNELS.authDeepLink, handler),
   launchLoader: () => invoke(IPC_CHANNELS.launchLoader),
   openExternalUrl: (url: string) => invoke(IPC_CHANNELS.openExternalUrl, url),
+  toggleScriptEnabled: (filename: string, enable: boolean, game?: ActiveGame) => invoke(IPC_CHANNELS.toggleScriptEnabled, filename, enable, game),
 }
 
 contextBridge.exposeInMainWorld('umbrella', api)
