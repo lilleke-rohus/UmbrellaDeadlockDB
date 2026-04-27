@@ -1,30 +1,13 @@
 import { useMemo, useState } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import { useCatalog } from '../hooks/useCatalog'
 import { useScriptUpdateHighlightSet } from '../hooks/useScriptUpdateHighlight'
 import type { VaultOutletContext } from '../components/Layout'
 import { IconRowScript, IconScriptTile } from '../components/NavIcons'
 import { useGame } from '../context/GameContext'
-import { useToast } from '../context/ToastContext'
-import { scanLocalLuaScriptsWithHashes, summarizeHashCheckAgainstCatalog } from '../lib/scriptHash'
 import { stripMarkdown } from '../lib/stripMarkdown'
 
-type SortMode = 'newest' | 'oldest' | 'az' | 'za'
 type CatalogItem = ReturnType<typeof useCatalog>['items'][number]
-
-const SORT_OPTIONS: ReadonlyArray<{ value: SortMode; label: string }> = [
-  { value: 'newest', label: 'Newest' },
-  { value: 'oldest', label: 'Oldest' },
-  { value: 'az', label: 'A–Z' },
-  { value: 'za', label: 'Z–A' },
-]
-
-const SORT_COMPARATORS: Readonly<Record<SortMode, (left: CatalogItem, right: CatalogItem) => number>> = {
-  newest: (left, right) => right.updated_at.localeCompare(left.updated_at),
-  oldest: (left, right) => left.updated_at.localeCompare(right.updated_at),
-  az: (left, right) => left.title.localeCompare(right.title),
-  za: (left, right) => right.title.localeCompare(left.title),
-}
 
 function collectCategories(items: CatalogItem[]): string[] {
   const categories = new Set<string>()
@@ -57,10 +40,6 @@ function filterCatalog(items: CatalogItem[], category: string | null, query: str
     }
     return matchesSearchQuery(item, query)
   })
-}
-
-function sortCatalog(items: CatalogItem[], sort: SortMode): CatalogItem[] {
-  return [...items].sort(SORT_COMPARATORS[sort])
 }
 
 function buildSummary(total: number, visible: number, hasFilters: boolean): string {
@@ -114,18 +93,109 @@ function formatUpdated(iso: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function isSortMode(value: string): value is SortMode {
-  return value === 'newest' || value === 'oldest' || value === 'az' || value === 'za'
-}
 
 const SKELETON_KEYS = [1, 2, 3, 4, 5, 6] as const
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+
+function isNewScript(publishedAt: string | null): boolean {
+  if (!publishedAt) return false
+  return Date.now() - new Date(publishedAt).getTime() < SEVEN_DAYS_MS
+}
+
+function buildTrendingSet(items: CatalogItem[], topN = 3): Set<string> {
+  const sorted = [...items].sort((a, b) => (b.install_count ?? 0) - (a.install_count ?? 0))
+  return new Set(sorted.slice(0, topN).map((s) => s.id))
+}
+
+function buildFeaturedList(items: CatalogItem[]): CatalogItem[] {
+  return items.filter((s) => s.featured)
+}
+
+function IcoTrendArrow(): React.ReactElement {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 7.5l2.5-2.5 2 2L9 3"/>
+      <path d="M7 3h2v2"/>
+    </svg>
+  )
+}
+
+function IcoStar(): React.ReactElement {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+      <path d="M5 1l1.1 2.5H9L6.9 5.2l.8 2.6L5 6.3l-2.7 1.5.8-2.6L1 3.5h2.9L5 1Z"/>
+    </svg>
+  )
+}
+
+function FeaturedCard({ script }: { script: CatalogItem }): React.ReactElement {
+  const navigate = useNavigate()
+  return (
+    <div
+      className="featured-card fadeup"
+      onClick={() => void navigate(`/script/${script.slug}`)}
+    >
+      <div className="featured-card-accent">
+        <div className="featured-card-accent-inner" />
+      </div>
+
+      <div className="featured-card-header">
+        <div className="featured-card-title-block">
+          <div className="card-icon"><IconScriptTile /></div>
+          <div>
+            <div className="featured-card-title">{script.title}</div>
+            <div className="featured-card-author">by {script.author_display_name ?? 'Author'}</div>
+          </div>
+        </div>
+        <div className="featured-card-meta">
+          <span className="badge badge-featured"><IcoStar /> Featured</span>
+          <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 10, color: 'var(--color-text-tertiary)' }}>
+            v{script.content_version}
+          </span>
+        </div>
+      </div>
+
+      <p className="featured-card-desc">{stripMarkdown(script.description) || 'No description.'}</p>
+
+      <div className="featured-card-footer">
+        <div className="featured-card-footer-left">
+          <span className="meta-item">{script.install_count ?? 0} installs</span>
+          <span style={{ color: 'var(--color-border-secondary)' }}>·</span>
+          {script.category && (
+            <span style={{ fontSize: 9.5, color: 'var(--color-text-tertiary)', background: 'var(--color-tag-bg)', border: '1px solid var(--color-border-tertiary)', padding: '1px 6px', borderRadius: 4, fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>
+              {script.category}
+            </span>
+          )}
+        </div>
+        <span className="install-btn">Open</span>
+      </div>
+    </div>
+  )
+}
 
 type CatalogViewProps = {
   scripts: CatalogItem[]
   highlightIds: Set<string>
+  trendingIds: Set<string>
+  featuredIds: Set<string>
 }
 
-function CatalogGrid({ scripts, highlightIds }: CatalogViewProps): React.ReactElement {
+function ScriptBadges({ script, trendingIds, featuredIds }: { script: CatalogItem; trendingIds: Set<string>; featuredIds: Set<string> }): React.ReactElement | null {
+  const trending = trendingIds.has(script.id)
+  const featured = featuredIds.has(script.id)
+  const isNew = isNewScript(script.published_at)
+  if (!trending && !featured && !isNew) return null
+  return (
+    <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+      {trending && <span className="badge badge-trending"><IcoTrendArrow /> Trending</span>}
+      {isNew && <span className="badge badge-new">New</span>}
+      {featured && !trending && !isNew && <span className="badge badge-featured"><IcoStar /> Featured</span>}
+    </div>
+  )
+}
+
+function CatalogGrid({ scripts, highlightIds, trendingIds, featuredIds }: CatalogViewProps): React.ReactElement {
   return (
     <div className="card-grid fade-in" aria-label="Scripts">
       {scripts.map((s) => (
@@ -134,6 +204,7 @@ function CatalogGrid({ scripts, highlightIds }: CatalogViewProps): React.ReactEl
           to={`/script/${s.slug}`}
           className={`script-card${highlightIds.has(s.id) ? ' script-card-has-update' : ''}`}
         >
+          <ScriptBadges script={s} trendingIds={trendingIds} featuredIds={featuredIds} />
           <div className="card-header">
             <div className="card-icon">
               <IconScriptTile />
@@ -165,7 +236,7 @@ function CatalogGrid({ scripts, highlightIds }: CatalogViewProps): React.ReactEl
   )
 }
 
-function CatalogList({ scripts, highlightIds }: CatalogViewProps): React.ReactElement {
+function CatalogList({ scripts, highlightIds, trendingIds, featuredIds }: CatalogViewProps): React.ReactElement {
   return (
     <div className="row-list fade-in" aria-label="Scripts">
       {scripts.map((s) => (
@@ -178,7 +249,11 @@ function CatalogList({ scripts, highlightIds }: CatalogViewProps): React.ReactEl
             <IconRowScript />
           </div>
           <div className="row-info">
-            <div className="row-name">{s.title}</div>
+            <div className="row-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {s.title}
+              {trendingIds.has(s.id) && <span className="badge badge-trending"><IcoTrendArrow /> Trending</span>}
+              {isNewScript(s.published_at) && <span className="badge badge-new">New</span>}
+            </div>
             <div className="row-desc line-clamp">
               {stripMarkdown(s.description) || 'No description.'} · by {s.author_display_name ?? 'Author'}
             </div>
@@ -203,11 +278,7 @@ export function HomePage(): React.ReactElement {
   const { storeSearch, storeView } = useOutletContext<VaultOutletContext>()
   const { activeGame } = useGame()
   const { items, loading, error, online, refresh } = useCatalog(activeGame)
-  const { addToast } = useToast()
   const [cat, setCat] = useState<string | null>(null)
-  const [sort, setSort] = useState<SortMode>('newest')
-  const [checkingHashes, setCheckingHashes] = useState(false)
-  const [hashProgress, setHashProgress] = useState<{ done: number; total: number } | null>(null)
 
   const query = storeSearch
 
@@ -215,41 +286,17 @@ export function HomePage(): React.ReactElement {
 
   const filtered = useMemo(() => filterCatalog(items, cat, query), [items, cat, query])
 
-  const sorted = useMemo(() => sortCatalog(filtered, sort), [filtered, sort])
-
-  const catalogUpdateIds = useScriptUpdateHighlightSet(sorted, activeGame)
+  const catalogUpdateIds = useScriptUpdateHighlightSet(filtered, activeGame)
 
   const hasFilters = Boolean(cat) || query.trim().length > 0
   const summary = buildSummary(items.length, filtered.length, hasFilters)
 
-  async function checkForScriptUpdates(): Promise<void> {
-    if (checkingHashes) return
-    setCheckingHashes(true)
-    setHashProgress({ done: 0, total: 0 })
-    addToast('Checking local script hashes…')
-    try {
-      const localScan = await scanLocalLuaScriptsWithHashes((progress) => {
-        setHashProgress(progress)
-      }, activeGame)
-      if (localScan.error) {
-        addToast(localScan.error, 'error')
-        return
-      }
-      const result = summarizeHashCheckAgainstCatalog(localScan.scripts, items)
-      addToast(
-        `Hash check: ${result.current} current, ${result.outdated} need update, ${result.missingHash} missing hash, ${result.unknown} not in store.`,
-        result.outdated > 0 ? 'info' : 'success',
-      )
-    } finally {
-      setCheckingHashes(false)
-    }
-  }
+  const featuredScripts = useMemo(() => (hasFilters ? [] : buildFeaturedList(items)), [items, hasFilters])
+  const trendingIds = useMemo(() => buildTrendingSet(items, 3), [items])
+  const featuredIds = useMemo(() => new Set(featuredScripts.map((s) => s.id)), [featuredScripts])
 
   return (
     <div className="page home-page">
-      <p className="store-lead muted">
-        Browse scripts, install them to your scripts folder, and stay updated.
-      </p>
 
       <div className="filter-bar" role="group" aria-label="Category">
         <button
@@ -272,21 +319,6 @@ export function HomePage(): React.ReactElement {
           </button>
         ))}
         <div className="filter-bar-end">
-          <select
-            className="admin-select"
-            value={sort}
-            onChange={(e) => {
-              const value = e.target.value
-              if (isSortMode(value)) setSort(value)
-            }}
-            aria-label="Sort by"
-          >
-            {SORT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
           {!online && (
             <span className="nav-badge" role="status" title="Offline — showing cached catalog">
               Cached
@@ -295,28 +327,27 @@ export function HomePage(): React.ReactElement {
           <button type="button" className="btn btn-compact" onClick={() => void refresh()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh catalog'}
           </button>
-          <button
-            type="button"
-            className="btn btn-compact"
-            onClick={() => void checkForScriptUpdates()}
-            disabled={checkingHashes || loading}
-            title="Compare local script hashes against store versions"
-          >
-            {checkingHashes
-              ? `Checking ${hashProgress?.done ?? 0}/${hashProgress?.total ?? 0}…`
-              : 'Check for updates'}
-          </button>
         </div>
       </div>
 
+      {error && !items.length && <p className="error">{error}</p>}
+
+      {/* Featured section — only shown when no filter/search is active */}
+      {!hasFilters && !loading && featuredScripts.length > 0 && (
+        <>
+          <div className="section-label" style={{ color: '#c4a96c' }}>Featured</div>
+          <div className="featured-grid">
+            {featuredScripts.map((s) => <FeaturedCard key={s.id} script={s} />)}
+          </div>
+        </>
+      )}
+
       <div className="section-header">
-        <span className="section-title">Script Store</span>
+        <span className="section-title">{hasFilters ? 'Results' : 'All Scripts'}</span>
         <span className="section-count" aria-live="polite">
           {loading && !items.length ? 'Loading…' : summary}
         </span>
       </div>
-
-      {error && !items.length && <p className="error">{error}</p>}
 
       {loading && !items.length ? (
         storeView === 'grid' ? (
@@ -329,12 +360,22 @@ export function HomePage(): React.ReactElement {
           </div>
         )
       ) : storeView === 'grid' ? (
-        <CatalogGrid scripts={sorted} highlightIds={catalogUpdateIds} />
+        <CatalogGrid
+          scripts={filtered}
+          highlightIds={catalogUpdateIds}
+          trendingIds={trendingIds}
+          featuredIds={featuredIds}
+        />
       ) : (
-        <CatalogList scripts={sorted} highlightIds={catalogUpdateIds} />
+        <CatalogList
+          scripts={filtered}
+          highlightIds={catalogUpdateIds}
+          trendingIds={trendingIds}
+          featuredIds={featuredIds}
+        />
       )}
 
-      {!loading && !sorted.length && (
+      {!loading && !filtered.length && (
         <p className="muted empty-state">No scripts match your search or filter.</p>
       )}
     </div>

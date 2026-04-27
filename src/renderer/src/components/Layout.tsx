@@ -139,6 +139,7 @@ export function Layout(): ReactElement {
                 onViewChange={setLibraryView}
                 activeGame={activeGame}
                 onToggleGame={toggleGame}
+                showViewToggle={false}
                 trailing={
                   user && canOpenAuthorStudio && authorStudioActive ? (
                     <button type="button" className="btn btn-primary" onClick={() => setLibraryNewDraft(true)}>
@@ -413,6 +414,7 @@ function VaultSearchTopbar({
   activeGame,
   onToggleGame,
   trailing,
+  showViewToggle = true,
 }: {
   searchInputId: string
   placeholder: string
@@ -424,6 +426,7 @@ function VaultSearchTopbar({
   activeGame: ActiveGame
   onToggleGame: () => void
   trailing?: ReactNode
+  showViewToggle?: boolean
 }): ReactElement {
   return (
     <>
@@ -443,7 +446,7 @@ function VaultSearchTopbar({
       <div className="topbar-actions">
         <GameSwitcherButton activeGame={activeGame} onToggle={onToggleGame} />
         {trailing}
-        <ViewToggle view={view} onViewChange={onViewChange} />
+        {showViewToggle && <ViewToggle view={view} onViewChange={onViewChange} />}
       </div>
     </>
   )
